@@ -1,0 +1,308 @@
+import type Content from '../block/base/content';
+import type TreeNode from '../block/base/treeNode';
+import type { IHighlight } from '../inlineRenderer/types';
+import type { Muya } from '../muya';
+import type { IMatch, ISearchOption } from './types';
+import { DEFAULT_SEARCH_OPTIONS } from '../config';
+import { buildRegexValue, matchString } from '../utils/search';
+
+// Re-rendering inline DOM is substantially more expensive than collecting
+// matches on Android WebView. Above this bound, keep the exact result set and
+// navigation but render only the active match instead of blocking on hundreds
+// or thousands of background highlights.
+export const MAX_FULL_SEARCH_HIGHLIGHTS = 100;
+
+export class Search {
+    private _value: string = '';
+    private _matchesByBlock = new Map<Content, IMatch[]>();
+    public matches: IMatch[] = [];
+    public index: number = -1;
+
+    get value() {
+        return this._value;
+    }
+
+    private get _scrollPage() {
+        return this._muya.editor.scrollPage;
+    }
+
+    constructor(private _muya: Muya) {}
+
+    // Drop match state when the document is replaced (e.g. a tab switch), so
+    // stale matches don't reference the previous document's blocks (#1932).
+    reset() {
+        this._value = '';
+        this._matchesByBlock.clear();
+        this.matches = [];
+        this.index = -1;
+    }
+
+    private _updateMatches(isClear = false) {
+        const { matches, index } = this;
+        let i;
+        const len = matches.length;
+        const activeOnly = len > MAX_FULL_SEARCH_HIGHLIGHTS;
+        const matchesMap = new Map<Content, IHighlight[]>();
+
+        for (i = 0; i < len; i++) {
+            const { block, start, end } = matches[i];
+            const active = i === index;
+            if (activeOnly && !active)
+                continue;
+            const highlight: IHighlight = { start, end, active };
+            const highlights = matchesMap.get(block);
+
+            if (matchesMap.has(block) && Array.isArray(highlights)) {
+                highlights.push(highlight);
+                matchesMap.set(block, highlights);
+            }
+            else {
+                matchesMap.set(block, [highlight]);
+            }
+        }
+
+        for (const [block, highlights] of matchesMap.entries()) {
+            const isActive = highlights.some(h => h.active);
+
+            block.update(undefined, isClear ? [] : highlights);
+
+            if (block.parent?.active && !isActive)
+                block.blurHandler();
+
+            if (isActive && !isClear)
+                block.focusHandler();
+        }
+    }
+
+    private _updateMatchBlocks(blocks: ReadonlySet<Content>) {
+        const { matches, index } = this;
+        const activeOnly = matches.length > MAX_FULL_SEARCH_HIGHLIGHTS;
+        const activeMatch = matches[index];
+
+        for (const block of blocks) {
+            const highlights: IHighlight[] = [];
+            for (const match of this._matchesByBlock.get(block) ?? []) {
+                const active = match === activeMatch;
+                if (!activeOnly || active) {
+                    highlights.push({
+                        start: match.start,
+                        end: match.end,
+                        active,
+                    });
+                }
+            }
+
+            const isActive = highlights.some(highlight => highlight.active);
+            block.update(undefined, highlights);
+
+            if (block.parent?.active && !isActive)
+                block.blurHandler();
+
+            if (isActive)
+                block.focusHandler();
+        }
+    }
+
+    private _innerReplace(matches: IMatch[], value: string) {
+        if (!matches.length)
+            return;
+
+        let tempText = '';
+        let lastBlock = matches[0].block;
+        let lastEnd = 0;
+
+        for (const match of matches) {
+            const { start, end, block } = match;
+            if (lastBlock !== block) {
+                if (lastBlock)
+                    lastBlock.text = tempText + lastBlock.text.substring(lastEnd);
+
+                tempText = '';
+                lastEnd = 0;
+                lastBlock = block;
+            }
+
+            tempText += block.text.substring(lastEnd, start);
+            tempText += value;
+            lastEnd = end;
+        }
+
+        lastBlock.text = tempText + lastBlock.text.substring(lastEnd);
+    }
+
+    replace(
+        replaceValue: string,
+        opt: ISearchOption & { isSingle?: boolean } = { isSingle: true, isRegexp: false },
+    ) {
+        const { isSingle = true, isRegexp, ...rest } = opt;
+        const options = Object.assign({}, DEFAULT_SEARCH_OPTIONS, rest);
+        const { matches, index } = this;
+        const value = this._value;
+
+        // A single replace needs an active match to consume; index is -1
+        // after a previous replace exhausted every match outside its own
+        // insertion (see below). find() navigates out of that state.
+        if (isSingle && index < 0)
+            return this;
+
+        if (matches.length) {
+            if (isRegexp)
+                replaceValue = buildRegexValue(matches[index], replaceValue);
+
+            if (isSingle) {
+                // replace one
+                this._innerReplace([matches[index]], replaceValue);
+
+                // After the re-search the match array is [before (index
+                // entries), inserted (matches the replacement itself
+                // contains), after]. The active match must never land inside
+                // an insertion — a replacement that still contains the query
+                // (cat -> wildcat) would otherwise compound the same spot on
+                // every tap. Prefer the first match after the insertion. When
+                // none remains: an inert replacement steps back to the last
+                // match before it (the classic behavior — nothing it could
+                // select is ever an insertion), while a query-containing one
+                // deselects (-1), because earlier "before" matches may be
+                // this session's own previous insertions. The surviving
+                // highlights stay reachable through deliberate arrow
+                // navigation, and find() recovers from -1.
+                const inside = matchString(replaceValue, value, options).length;
+                this.search(value, { ...options, highlightIndex: -1 });
+                const total = this.matches.length;
+                let desired = index + inside;
+                if (desired > total - 1)
+                    desired = inside === 0 ? index - 1 : -1;
+                if (desired !== this.index) {
+                    this.index = desired;
+                    this._updateMatches();
+                }
+            }
+            else {
+                // replace all
+                this._innerReplace(matches, replaceValue);
+                this.search(value, { ...options, highlightIndex: -1 });
+            }
+        }
+
+        return this;
+    }
+
+    /**
+     * Find preview or next value, and highlight it.
+     * @param {string} action : previous or next.
+     */
+    find(action: 'previous' | 'next'): this {
+        const { matches } = this;
+        let { index } = this;
+        const len = matches.length;
+
+        if (!len)
+            return this;
+
+        index = action === 'next' ? index + 1 : index - 1;
+
+        if (index < 0)
+            index = len - 1;
+
+        if (index >= len)
+            index = 0;
+
+        const previousBlock = matches[this.index]?.block;
+        this.index = index;
+        const changedBlocks = new Set<Content>([matches[index].block]);
+        if (previousBlock)
+            changedBlocks.add(previousBlock);
+        this._updateMatchBlocks(changedBlocks);
+
+        return this;
+    }
+
+    /**
+     * Search value in current document.
+     * @param {string} value
+     * @param {object} opts
+     */
+    search(value: string, opts = {}) {
+        const matches: IMatch[] = [];
+        const options = Object.assign({}, DEFAULT_SEARCH_OPTIONS, opts);
+        const { highlightIndex, selectHighlight } = options;
+        let index = -1;
+
+        // The currently active match, captured before it is cleared below, so a
+        // `selectHighlight` request can drop the cursor back onto it when the
+        // new search has no match of its own (e.g. closing the search bar).
+        const prevActiveMatch = this.matches[this.index];
+
+        // Empty last search.
+        this._updateMatches(true);
+
+        // Highlight current search.
+        if (value) {
+            // Search walks the LIVE tree; a progressive mount still in flight
+            // would silently drop tail matches (#4887). Searching is an
+            // explicit user action, so completing the mount here is the
+            // documented trade.
+            this._scrollPage?.flushPendingMount();
+            this._scrollPage?.depthFirstTraverse((block: TreeNode) => {
+                if (block.isContent()) {
+                    const { text } = block;
+                    if (text && typeof text === 'string') {
+                        const strMatches = matchString(text, value, options);
+                        matches.push(
+                            ...strMatches.map(({ index, match, subMatches }) => {
+                                return {
+                                    block,
+                                    start: index,
+                                    end: index + match.length,
+                                    match,
+                                    subMatches,
+                                };
+                            }),
+                        );
+                    }
+                }
+            });
+        }
+
+        if (highlightIndex >= 0 && highlightIndex < matches.length) {
+            // If set a valid highlight index, highlight that match.
+            index = highlightIndex;
+        }
+        else if (matches.length) {
+            // highlight the first word that matches.
+            index = 0;
+        }
+
+        const matchesByBlock = new Map<Content, IMatch[]>();
+        for (const match of matches) {
+            const blockMatches = matchesByBlock.get(match.block);
+            if (blockMatches)
+                blockMatches.push(match);
+            else
+                matchesByBlock.set(match.block, [match]);
+        }
+
+        Object.assign(this, {
+            _value: value,
+            _matchesByBlock: matchesByBlock,
+            matches,
+            index,
+        });
+
+        this._updateMatches();
+
+        // Restore the editor cursor onto the active match. Mirrors muyajs's
+        // `render(selectHighlight)` -> `setCursor()` path: closing the search
+        // bar empties the search with `selectHighlight`, which must place the
+        // cursor where the highlight was so the user can keep typing there.
+        if (selectHighlight) {
+            const activeMatch = matches[index] ?? prevActiveMatch;
+            if (activeMatch) {
+                const { block, start, end } = activeMatch;
+                block.setCursor(start, end, true);
+            }
+        }
+
+        return this;
+    }
+}

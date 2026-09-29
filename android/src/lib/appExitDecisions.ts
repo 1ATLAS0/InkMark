@@ -1,0 +1,223 @@
+import { HOME_TABS, type HomeTab } from '../features/home/homeNavigation'
+import { SETTINGS_PAGES, type SettingsPage } from '../features/settings/settingsNavigation'
+import type { AutosaveTarget } from './documentState'
+
+export type AppScreen = 'home' | 'editor' | 'open-locations' | 'cloud-browser' | 'save-locations'
+
+export type ShowHomeDocumentSaveAction = 'save-android-document' | 'save-local-draft'
+
+export type ShowHomeAfterSaveAction =
+  | 'close-editor'
+  | 'open-android-exit-prompt'
+  | 'open-local-draft-exit-prompt'
+  | 'stay-editor'
+
+export interface AppBackButtonState {
+  currentScreen: AppScreen
+  homeTab: HomeTab
+  settingsPage: SettingsPage
+  incomingOpenPromptOpen: boolean
+  androidExitPromptOpen: boolean
+  draftExitPromptOpen: boolean
+  linkSheetOpen: boolean
+  tableSheetOpen: boolean
+  editorMenuOpen: boolean
+  editorOutlineOpen: boolean
+  editorSearchOpen: boolean
+  editorToolbarExpanded: boolean
+  editorSourceModeActive: boolean
+  homeSelectionActive: boolean
+  homeSheetOpen: boolean
+  /** True when the cloud browser sits at its root folder. */
+  cloudBrowserAtRoot?: boolean
+  /** True while the cloud browser hosts a save-as folder pick. */
+  cloudBrowserSaveModeActive?: boolean
+  /** True while the save-as name sheet is open. */
+  cloudNameSheetOpen?: boolean
+  /** True while the save-as Drive folder pick waits on the browser trip. */
+  googleDriveFolderPickActive?: boolean
+  /** True while a cloud create is in flight; Back must not interrupt it. */
+  cloudSaveInProgress?: boolean
+}
+
+export type AppBackButtonAction =
+  | 'close-incoming-open-prompt'
+  | 'close-android-exit-prompt'
+  | 'close-local-draft-exit-prompt'
+  | 'close-link-sheet'
+  | 'close-table-sheet'
+  | 'close-editor-menu'
+  | 'close-editor-outline'
+  | 'close-editor-search'
+  | 'close-editor-toolbar'
+  | 'close-editor-source-mode'
+  | 'close-home-sheet'
+  | 'clear-home-selection'
+  | 'show-home'
+  | 'show-open-locations'
+  | 'cloud-browser-up'
+  | 'cancel-save-destination'
+  | 'cancel-cloud-name'
+  | 'cancel-google-folder-pick'
+  | 'cancel-onedrive-folder-pick'
+  | 'ignore-cloud-save'
+  | 'show-settings-index'
+  | 'show-documents-tab'
+  | 'exit-app'
+
+export function getShowHomeDocumentSaveAction(
+  autosaveTarget: AutosaveTarget,
+): ShowHomeDocumentSaveAction {
+  return autosaveTarget === 'android-document' ? 'save-android-document' : 'save-local-draft'
+}
+
+export function getShowHomeAfterAndroidSaveAction({
+  saved,
+  shouldPromptAndroidExitAfterSaveFailure,
+}: {
+  saved: boolean
+  shouldPromptAndroidExitAfterSaveFailure: boolean
+}): ShowHomeAfterSaveAction {
+  if (saved) {
+    return 'close-editor'
+  }
+
+  return shouldPromptAndroidExitAfterSaveFailure ? 'open-android-exit-prompt' : 'stay-editor'
+}
+
+export function getShowHomeAfterLocalDraftSaveAction({
+  shouldPromptLocalDraftSaveToDevice,
+}: {
+  shouldPromptLocalDraftSaveToDevice: boolean
+}): ShowHomeAfterSaveAction {
+  return shouldPromptLocalDraftSaveToDevice ? 'open-local-draft-exit-prompt' : 'close-editor'
+}
+
+export function getAppBackButtonAction({
+  currentScreen,
+  homeTab,
+  settingsPage,
+  incomingOpenPromptOpen,
+  androidExitPromptOpen,
+  draftExitPromptOpen,
+  linkSheetOpen,
+  tableSheetOpen,
+  editorMenuOpen,
+  editorOutlineOpen,
+  editorSearchOpen,
+  editorToolbarExpanded,
+  editorSourceModeActive,
+  homeSelectionActive,
+  homeSheetOpen,
+  cloudBrowserAtRoot,
+  cloudBrowserSaveModeActive,
+  cloudNameSheetOpen,
+  googleDriveFolderPickActive,
+  cloudSaveInProgress,
+}: AppBackButtonState): AppBackButtonAction {
+  // The save-as flow renders above every editor layer, so its overlays
+  // unwind first, top-most first. An in-flight cloud create cannot be
+  // interrupted: the document may already exist remotely.
+  if (cloudSaveInProgress) {
+    return 'ignore-cloud-save'
+  }
+
+  if (cloudNameSheetOpen) {
+    return 'cancel-cloud-name'
+  }
+
+  if (googleDriveFolderPickActive) {
+    return 'cancel-google-folder-pick'
+  }
+
+  // The save-as screens are the only reachable layer while they are up —
+  // the editor behind them is inert — so their Back rules outrank every
+  // editor-layer prompt and panel state left open underneath.
+  if (currentScreen === 'save-locations') {
+    return 'cancel-save-destination'
+  }
+
+  if (currentScreen === 'cloud-browser' && cloudBrowserSaveModeActive) {
+    // Folder by folder, then cancel: the browser was entered from the
+    // save flow, not the Open page.
+    return cloudBrowserAtRoot === false ? 'cloud-browser-up' : 'cancel-onedrive-folder-pick'
+  }
+
+  // The blocked-preservation prompt guards unsaved work; Back keeps editing.
+  if (incomingOpenPromptOpen) {
+    return 'close-incoming-open-prompt'
+  }
+
+  if (androidExitPromptOpen) {
+    return 'close-android-exit-prompt'
+  }
+
+  if (draftExitPromptOpen) {
+    return 'close-local-draft-exit-prompt'
+  }
+
+  if (linkSheetOpen) {
+    return 'close-link-sheet'
+  }
+
+  if (tableSheetOpen) {
+    return 'close-table-sheet'
+  }
+
+  if (editorMenuOpen) {
+    return 'close-editor-menu'
+  }
+
+  if (editorOutlineOpen) {
+    return 'close-editor-outline'
+  }
+
+  if (editorSearchOpen) {
+    return 'close-editor-search'
+  }
+
+  if (editorToolbarExpanded) {
+    return 'close-editor-toolbar'
+  }
+
+  // Source mode dismisses like a panel: first Back hands the text back to
+  // the WYSIWYG editor, a second Back leaves the editor.
+  if (currentScreen === 'editor' && editorSourceModeActive) {
+    return 'close-editor-source-mode'
+  }
+
+  if (currentScreen === 'editor') {
+    return 'show-home'
+  }
+
+  // The open-flow cloud browser backs out folder by folder, then to the
+  // Open page (the save-mode browser is handled above the editor layers).
+  if (currentScreen === 'cloud-browser') {
+    return cloudBrowserAtRoot === false ? 'cloud-browser-up' : 'show-open-locations'
+  }
+
+  if (currentScreen === 'open-locations') {
+    return 'show-home'
+  }
+
+  if (currentScreen === 'home' && homeTab === HOME_TABS.DOCUMENTS) {
+    // A confirm/rename sheet dismisses on its own before the selection does.
+    if (homeSheetOpen) {
+      return 'close-home-sheet'
+    }
+
+    if (homeSelectionActive) {
+      return 'clear-home-selection'
+    }
+  }
+
+  if (homeTab === HOME_TABS.SETTINGS && settingsPage !== SETTINGS_PAGES.INDEX) {
+    return 'show-settings-index'
+  }
+
+  if (homeTab !== HOME_TABS.DOCUMENTS) {
+    return 'show-documents-tab'
+  }
+
+  return 'exit-app'
+}

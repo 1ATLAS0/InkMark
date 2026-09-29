@@ -1,0 +1,340 @@
+/// <reference types="node" />
+
+import { readdirSync, readFileSync } from 'node:fs'
+import { basename, join, relative } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { APP_THEME_IDS, isDarkAppTheme, type AppThemeId } from '../features/settings/themeRuntime'
+
+const sourceRoot = join(process.cwd(), 'src')
+const themesRoot = join(sourceRoot, 'styles', 'themes')
+const structuralTokensPath = join(sourceRoot, 'styles', 'theme-tokens.css')
+const taskListStylesPath = join(
+  process.cwd(),
+  'third_party',
+  'muya',
+  'src',
+  'assets',
+  'styles',
+  'blockSyntax.css',
+)
+
+// Every shipped palette (file name = theme id); the first entry is the
+// canonical token set the others are compared against. Prism overlay files
+// are rule-only (no token definitions) and stay out of this list.
+const themePaths = readdirSync(themesRoot)
+  .filter(name => name.endsWith('.css') && !name.startsWith('prism-'))
+  .sort()
+  .map(name => join(themesRoot, name))
+
+// Tokens set from JS at runtime (inline style vars) rather than in a stylesheet.
+const RUNTIME_DEFINED_TOKENS = new Set(['--editor-area-width', '--outline-indent'])
+
+// The semantic contract every theme must satisfy (documented in theme-tokens.css).
+const REQUIRED_SEMANTIC_TOKENS = [
+  '--app-bg',
+  '--surface',
+  '--surface-muted',
+  '--surface-sunken',
+  '--surface-raised',
+  '--text',
+  '--text-muted',
+  '--text-faint',
+  '--task-completed-color',
+  '--on-accent',
+  '--border',
+  '--border-strong',
+  '--separator',
+  '--accent',
+  '--accent-strong',
+  '--accent-hover',
+  '--accent-soft',
+  '--danger',
+  '--focus-ring',
+  '--press',
+  '--scrim',
+  '--shadow-sm',
+  '--shadow-float',
+  '--shadow-thumb',
+  '--shadow-accent',
+  '--editor-bg-color',
+  '--editor-color',
+  '--theme-color',
+  '--selection-color',
+  '--link-color',
+]
+
+function collectStyleFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = join(directory, entry.name)
+
+    if (entry.isDirectory()) {
+      return collectStyleFiles(path)
+    }
+
+    return entry.name.endsWith('.css') || entry.name.endsWith('.vue') ? [path] : []
+  })
+}
+
+function collectDefinedTokens(css: string): Set<string> {
+  return new Set(Array.from(css.matchAll(/(--[\w-]+)\s*:/g), match => match[1]))
+}
+
+function collectTokenValues(css: string): Map<string, string> {
+  return new Map(
+    Array.from(css.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g), match => [
+      match[1],
+      match[2].trim(),
+    ]),
+  )
+}
+
+function resolveHexToken(
+  tokens: Map<string, string>,
+  token: string,
+  visited = new Set<string>(),
+): [number, number, number] {
+  if (visited.has(token)) {
+    throw new Error(`circular color token: ${token}`)
+  }
+  visited.add(token)
+
+  const value = tokens.get(token)
+  if (!value) {
+    throw new Error(`missing color token: ${token}`)
+  }
+
+  const reference = value.match(/^var\(\s*(--[\w-]+)\s*\)$/)
+  if (reference) {
+    return resolveHexToken(tokens, reference[1], visited)
+  }
+
+  const hex = value.match(/^#([\da-f]{6})$/i)
+  if (!hex) {
+    throw new Error(`expected an opaque hex color for ${token}, received: ${value}`)
+  }
+
+  return [
+    Number.parseInt(hex[1].slice(0, 2), 16),
+    Number.parseInt(hex[1].slice(2, 4), 16),
+    Number.parseInt(hex[1].slice(4, 6), 16),
+  ]
+}
+
+function relativeLuminance([red, green, blue]: [number, number, number]) {
+  const linearize = (channel: number) => {
+    const value = channel / 255
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  }
+
+  return 0.2126 * linearize(red) + 0.7152 * linearize(green) + 0.0722 * linearize(blue)
+}
+
+function contrastRatio(foreground: [number, number, number], background: [number, number, number]) {
+  const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background))
+  const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background))
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+function collectReferencedTokens(css: string): Set<string> {
+  return new Set(Array.from(css.matchAll(/var\(\s*(--[\w-]+)/g), match => match[1]))
+}
+
+/** Resolves a token that may be an rgba() overlay (e.g. --press). */
+function resolveOverlayToken(
+  tokens: Map<string, string>,
+  token: string,
+): { rgb: [number, number, number]; alpha: number } {
+  const value = tokens.get(token)
+  const rgba = value?.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)$/)
+  if (!rgba) {
+    throw new Error(`expected an rgb/rgba color for ${token}, received: ${value}`)
+  }
+
+  return {
+    rgb: [Number(rgba[1]), Number(rgba[2]), Number(rgba[3])],
+    alpha: rgba[4] === undefined ? 1 : Number(rgba[4]),
+  }
+}
+
+function compositeOver(
+  overlay: { rgb: [number, number, number]; alpha: number },
+  background: [number, number, number],
+): [number, number, number] {
+  return background.map((channel, index) =>
+    Math.round(overlay.alpha * overlay.rgb[index] + (1 - overlay.alpha) * channel),
+  ) as [number, number, number]
+}
+
+describe('theme token architecture', () => {
+  it('keeps modern color functions out of shipped styles for old WebViews', () => {
+    const modernColorFunctionPattern = /\b(?:oklch|color-mix)\(/
+    const offenders = collectStyleFiles(sourceRoot)
+      .filter(path => path.endsWith('.css') || path.endsWith('.vue'))
+      .filter(path => modernColorFunctionPattern.test(readFileSync(path, 'utf8')))
+      .map(path => relative(process.cwd(), path))
+
+    expect(offenders).toEqual([])
+  })
+
+  it('ships exactly one palette per registered theme', () => {
+    const paletteIds = themePaths.map(path => basename(path, '.css')).sort()
+    expect(paletteIds).toEqual([...APP_THEME_IDS].sort())
+  })
+
+  it('scopes each palette to its own data-theme and matching color-scheme', () => {
+    for (const path of themePaths) {
+      const id = basename(path, '.css')
+      const css = readFileSync(path, 'utf8')
+
+      expect(css, id).toContain(`[data-theme='${id}']`)
+
+      const scheme = css.match(/color-scheme:\s*(light|dark)/)?.[1]
+      const expected = isDarkAppTheme(id as AppThemeId) ? 'dark' : 'light'
+      expect(scheme, `${id} color-scheme`).toBe(expected)
+    }
+  })
+
+  it('defines the same token set in every shipped theme', () => {
+    const [canonicalPath, ...otherPaths] = themePaths
+    const canonical = collectDefinedTokens(readFileSync(canonicalPath, 'utf8'))
+
+    for (const path of otherPaths) {
+      const tokens = collectDefinedTokens(readFileSync(path, 'utf8'))
+      const name = relative(process.cwd(), path)
+      const missing = [...canonical].filter(token => !tokens.has(token)).sort()
+      const extra = [...tokens].filter(token => !canonical.has(token)).sort()
+
+      expect(missing, `missing in ${name}`).toEqual([])
+      expect(extra, `extra in ${name}`).toEqual([])
+    }
+  })
+
+  it('covers the documented semantic contract in every theme', () => {
+    for (const path of themePaths) {
+      const tokens = collectDefinedTokens(readFileSync(path, 'utf8'))
+      const missing = REQUIRED_SEMANTIC_TOKENS.filter(token => !tokens.has(token))
+      expect(missing, `missing in ${relative(process.cwd(), path)}`).toEqual([])
+    }
+  })
+
+  it('keeps completed task text at WCAG AA contrast in every theme', () => {
+    for (const path of themePaths) {
+      const tokens = collectTokenValues(readFileSync(path, 'utf8'))
+      const ratio = contrastRatio(
+        resolveHexToken(tokens, '--task-completed-color'),
+        resolveHexToken(tokens, '--editor-bg-color'),
+      )
+      const name = relative(process.cwd(), path)
+
+      expect(ratio, `${name}: ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  it('keeps every raised-surface text role at WCAG AA contrast in every theme', () => {
+    // Sheets, menus, and floating toolbars all sit on --surface-raised and
+    // render normal-sized copy in these roles: body labels (--text),
+    // secondary copy (--text-muted), accent actions (--accent-strong — the
+    // accent TEXT role; plain --accent is reserved for fills and borders),
+    // and destructive actions (--danger). Pressed rows composite --press
+    // over the surface, which shifts it toward the ink and erodes contrast,
+    // so every role is checked against both the resting surface and the
+    // pressed composite.
+    const RAISED_TEXT_ROLES = ['--text', '--text-muted', '--accent-strong', '--danger']
+
+    for (const path of themePaths) {
+      const tokens = collectTokenValues(readFileSync(path, 'utf8'))
+      const raised = resolveHexToken(tokens, '--surface-raised')
+      const pressed = compositeOver(resolveOverlayToken(tokens, '--press'), raised)
+      const name = relative(process.cwd(), path)
+
+      for (const role of RAISED_TEXT_ROLES) {
+        const foreground = resolveHexToken(tokens, role)
+        for (const [state, background] of [['resting', raised], ['pressed', pressed]] as const) {
+          const ratio = contrastRatio(foreground, background)
+          expect(ratio, `${name} ${role} (${state}): ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+            4.5,
+          )
+        }
+      }
+    }
+  })
+
+  it('keeps on-accent contrast on accent fills in every theme', () => {
+    // The resting --accent fill carries normal-sized --on-accent text (the
+    // editor-failure retry action is 15px copy and keeps its fill while
+    // pressed), so that pair needs the full 4.5:1 text contrast. The
+    // pressed --accent-hover fill only ever shows --on-accent glyphs (the
+    // new-document "+" icon), so WCAG 1.4.11's 3:1 non-text minimum
+    // applies there. --accent-strong is deliberately absent: it is the
+    // accent TEXT role and must never be used as a fill.
+    for (const path of themePaths) {
+      const tokens = collectTokenValues(readFileSync(path, 'utf8'))
+      const onAccent = resolveHexToken(tokens, '--on-accent')
+      const name = relative(process.cwd(), path)
+
+      for (const [fill, minimum] of [
+        ['--accent', 4.5],
+        ['--accent-hover', 3],
+      ] as const) {
+        const ratio = contrastRatio(onAccent, resolveHexToken(tokens, fill))
+        expect(ratio, `${name} on-accent vs ${fill}: ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+          minimum,
+        )
+      }
+    }
+  })
+
+  it('keeps the unchecked toggle thumb visible on its track in every theme', () => {
+    // The resting settings-toggle thumb is --text-muted over the
+    // --surface-sunken track (SettingsToggleRow.vue); --on-accent has no
+    // guaranteed contrast against neutral surfaces, so the thumb must not
+    // use it while unchecked. WCAG 1.4.11 requires 3:1 for this control
+    // boundary. The checked state (on-accent thumb over the accent track)
+    // is covered by the accent-fill contract above.
+    for (const path of themePaths) {
+      const tokens = collectTokenValues(readFileSync(path, 'utf8'))
+      const ratio = contrastRatio(
+        resolveHexToken(tokens, '--text-muted'),
+        resolveHexToken(tokens, '--surface-sunken'),
+      )
+      const name = relative(process.cwd(), path)
+
+      expect(ratio, `${name} thumb vs track: ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  it('uses the completed-task token for checked task content', () => {
+    const taskListStyles = readFileSync(taskListStylesPath, 'utf8')
+    const checkedTaskRule = taskListStyles.match(
+      /li\.mu-task-list-item > input\.mu-checkbox-checked ~ \*,[\s\S]*?\{([\s\S]*?)\}/,
+    )
+
+    expect(checkedTaskRule?.[1]).toMatch(/color:\s*var\(--task-completed-color\)/)
+  })
+
+  it('never references an undefined token from app styles', () => {
+    const definedTokens = new Set<string>(RUNTIME_DEFINED_TOKENS)
+    for (const path of [structuralTokensPath, ...themePaths]) {
+      for (const token of collectDefinedTokens(readFileSync(path, 'utf8'))) {
+        definedTokens.add(token)
+      }
+    }
+
+    const styleFiles = collectStyleFiles(sourceRoot)
+    for (const path of styleFiles) {
+      const css = readFileSync(path, 'utf8')
+      for (const token of collectDefinedTokens(css)) {
+        definedTokens.add(token)
+      }
+    }
+
+    const offenders = styleFiles.flatMap(path => {
+      const referenced = collectReferencedTokens(readFileSync(path, 'utf8'))
+      return [...referenced]
+        .filter(token => !definedTokens.has(token))
+        .map(token => `${relative(process.cwd(), path)}: ${token}`)
+    })
+
+    expect(offenders.sort()).toEqual([])
+  })
+})

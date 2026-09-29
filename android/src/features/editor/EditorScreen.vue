@@ -1,0 +1,758 @@
+<script setup lang="ts">
+import { onBeforeUnmount, watch, ref, computed, nextTick, type CSSProperties } from 'vue'
+import AndroidExitPrompt from './components/AndroidExitPrompt.vue'
+import { handleSearchEnterKeydown } from './documentSearch'
+import type { OutlineItem } from './documentOutline'
+import EditorActionSheet from './components/EditorActionSheet.vue'
+import OutlineSheet from './components/OutlineSheet.vue'
+import LinkInsertSheet from './components/LinkInsertSheet.vue'
+import TableInsertSheet from './components/TableInsertSheet.vue'
+import LocalDraftExitPrompt from './components/LocalDraftExitPrompt.vue'
+import IncomingOpenPrompt from './components/IncomingOpenPrompt.vue'
+import MobileEditorToolbar from './components/MobileEditorToolbar.vue'
+import MobileSelectionToolbar from './components/MobileSelectionToolbar.vue'
+import LinkActionOverlay from './components/LinkActionOverlay.vue'
+import ResumeCard from './components/ResumeCard.vue'
+import EditorFailurePanel from './components/EditorFailurePanel.vue'
+import type { SelectionToolbarCommandId } from './selectionToolbar'
+import type { TableCommandId } from './tableCommands'
+import type { SelectionToolbarRows } from './selectionToolbarSettings'
+import type { MobileCommandId } from '../../lib/mobileCommands'
+import type {
+  MobileEditorToolbarPanel,
+  MobileToolbarCommandButton,
+} from '../../lib/mobileToolbarConfig'
+import { useI18n } from '../../lib/i18n'
+
+const props = defineProps<{
+  documentTitle: string
+  status: string
+  editorReady: boolean
+  editorFailed: boolean
+  showEditorActions: boolean
+  editorMenuOpen: boolean
+  toolbarVisible: boolean
+  toolbarExpanded: boolean
+  toolbarPanel: MobileEditorToolbarPanel
+  toolbarCompact: boolean
+  toolbarCaretInTable: boolean
+  quickToolbarCommands: readonly MobileToolbarCommandButton[]
+  wordCount: number
+  characterCount: number
+  lineCount: number
+  canShare: boolean
+  canExportPdf: boolean
+  canSaveToDevice: boolean
+  canSaveCopy: boolean
+  sharing: boolean
+  exportingPdf: boolean
+  savingToDevice: boolean
+  savingCopy: boolean
+  linkSheetOpen: boolean
+  linkText: string
+  linkUrl: string
+  tableSheetOpen: boolean
+  tableRows: number
+  tableColumns: number
+  draftExitPromptOpen: boolean
+  draftCanSaveToDevice: boolean
+  draftCanKeepLocal: boolean
+  draftSaving: boolean
+  androidExitPromptOpen: boolean
+  androidExitMessage: string
+  androidCanSaveCopy: boolean
+  androidCanKeepRecovery: boolean
+  androidSaving: boolean
+  incomingOpenPromptOpen: boolean
+  incomingOpenName: string
+  textDirection: 'ltr' | 'rtl'
+  editorStyleVars: CSSProperties
+  canPasteSelection: boolean
+  selectionCaretSession: boolean
+  selectionCustomCommands: readonly MobileToolbarCommandButton[]
+  selectionCustomRows: SelectionToolbarRows
+  linkOverlayEnabled: boolean
+  searchOpen: boolean
+  searchQuery: string
+  searchMatchCount: number
+  searchActiveIndex: number
+  searchReplaceOpen: boolean
+  searchReplaceValue: string
+  searchCaseSensitive: boolean
+  searchReplaceAllCount: number | null
+  outlineOpen: boolean
+  outlineItems: OutlineItem[]
+  resumeCardVisible: boolean
+  resumeCardText: string
+  sourceModeActive: boolean
+  sourceText: string
+  sourceEntryCaret: number
+  /** False for setting-driven auto-entry: opening a document must not pop the keyboard. */
+  sourceFocusOnEnter: boolean
+}>()
+
+const emit = defineEmits<{
+  back: []
+  'retry-editor': []
+  search: []
+  'close-search': []
+  'update:searchQuery': [value: string]
+  'search-next': []
+  'search-previous': []
+  'toggle-search-replace': []
+  'update:searchReplaceValue': [value: string]
+  'toggle-search-case': []
+  'search-replace-current': []
+  'search-replace-all': []
+  'open-outline': []
+  'close-outline': []
+  'select-outline-heading': [slug: string]
+  'resume-activate': []
+  'resume-dismiss': []
+  'toggle-menu': []
+  'close-menu': []
+  share: []
+  'export-pdf': []
+  'save-to-device': []
+  'save-copy': []
+  'run-toolbar-command': [commandId: MobileCommandId, restoreRange: Range | null]
+  'run-table-command': [commandId: TableCommandId]
+  'run-selection-command': [commandId: SelectionToolbarCommandId, restoreRange: Range | null]
+  'dismiss-selection': [caretRange: Range | null]
+  'open-link': [href: string]
+  'toggle-toolbar': []
+  'set-toolbar-panel': [panel: MobileEditorToolbarPanel]
+  'update:linkText': [value: string]
+  'update:linkUrl': [value: string]
+  'close-link-sheet': []
+  'insert-link': []
+  'update:tableRows': [value: number]
+  'update:tableColumns': [value: number]
+  'close-table-sheet': []
+  'insert-table': []
+  'save-draft-to-device': []
+  'keep-local-draft': []
+  'discard-local-draft': []
+  'save-android-copy': []
+  'keep-android-recovery': []
+  'discard-android-changes': []
+  'keep-incoming': []
+  'discard-incoming': []
+  'editor-host-change': [element: HTMLElement | null]
+  'toggle-source-mode': [caret: { start: number, end: number } | null]
+  'update:source-text': [value: string, caret: { start: number, end: number } | null]
+}>()
+
+const editorHost = ref<HTMLElement | null>(null)
+// Muya replaces the inner host element during init (originContainer.replaceWith),
+// so `editorHost` goes stale immediately. The shell stays in the document and
+// is the stable containment root for selection checks.
+const editorShell = ref<HTMLElement | null>(null)
+const { t } = useI18n()
+
+// Source code mode: the raw-Markdown textarea replacing the WYSIWYG surface.
+const sourceTextarea = ref<HTMLTextAreaElement | null>(null)
+
+function readSourceCaret(): { start: number, end: number } | null {
+  const area = sourceTextarea.value
+  if (!area) {
+    return null
+  }
+  return { start: area.selectionStart, end: area.selectionEnd }
+}
+
+function onSourceInput(event: Event) {
+  const area = event.target as HTMLTextAreaElement
+  emit('update:source-text', area.value, {
+    start: area.selectionStart,
+    end: area.selectionEnd,
+  })
+}
+
+function onToggleSourceMode() {
+  // Entering: no textarea caret exists yet. Exiting: hand the current one up.
+  emit('toggle-source-mode', props.sourceModeActive ? readSourceCaret() : null)
+}
+
+watch(
+  () => props.sourceModeActive,
+  active => {
+    if (!active) {
+      return
+    }
+    void nextTick(() => {
+      const area = sourceTextarea.value
+      if (!area) {
+        return
+      }
+      if (props.sourceFocusOnEnter) {
+        area.focus()
+      }
+      const offset = Math.min(props.sourceEntryCaret, area.value.length)
+      area.setSelectionRange(offset, offset)
+      // Bring the caret's line roughly into the upper third of the view —
+      // textareas do not scroll to a programmatic selection on their own.
+      const lineIndex = area.value.slice(0, offset).split('\n').length - 1
+      const lineHeight = Number.parseFloat(getComputedStyle(area).lineHeight) || 24
+      area.scrollTop = Math.max(0, lineIndex * lineHeight - area.clientHeight / 3)
+    })
+  },
+)
+
+// Any sheet or prompt above the editor takes over the interaction surface,
+// so the floating selection toolbar must stand down while one is open.
+const selectionToolbarSuspended = computed(
+  () =>
+    props.editorMenuOpen ||
+    props.searchOpen ||
+    props.outlineOpen ||
+    props.linkSheetOpen ||
+    props.tableSheetOpen ||
+    props.draftExitPromptOpen ||
+    props.androidExitPromptOpen ||
+    props.incomingOpenPromptOpen,
+)
+const linkInsertDispatching = ref(false)
+const linkInsertSheet = ref<InstanceType<typeof LinkInsertSheet> | null>(null)
+const linkSheetBackgroundAriaHidden = computed(() =>
+  props.linkSheetOpen && !linkInsertDispatching.value ? 'true' : undefined,
+)
+
+async function dispatchLinkInsert() {
+  if (linkInsertDispatching.value) {
+    return
+  }
+
+  linkInsertDispatching.value = true
+  try {
+    // Keep the sheet and captured selection intact, but flush aria-hidden off
+    // the editor before App temporarily focuses it for the insertion.
+    await nextTick()
+    emit('insert-link')
+    await nextTick()
+  } finally {
+    if (props.linkSheetOpen) {
+      linkInsertSheet.value?.focusInitialInput()
+    }
+    linkInsertDispatching.value = false
+  }
+}
+
+const searchInput = ref<HTMLInputElement | null>(null)
+const outlineButton = ref<HTMLButtonElement | null>(null)
+
+// Restore accessibility focus to the Outline trigger after the sheet closes
+// (any path: close button, scrim, Escape, Android Back, heading selection).
+// DOM focus only — a button focus never reopens the soft keyboard and never
+// touches Muya's cached editing selection.
+watch(
+  () => props.outlineOpen,
+  (open, wasOpen) => {
+    if (!open && wasOpen) {
+      void nextTick(() => {
+        if (outlineButton.value?.isConnected) {
+          outlineButton.value.focus({ preventScroll: true })
+        }
+      })
+    }
+  },
+)
+
+// After an insert sheet closes, focus must not be left dangling on <body>.
+// Only rescue a DANGLING focus: after an insert the editor takes the cursor
+// and owns the focus — never steal it back to a button. The sheets leave
+// through a Transition, so at this point the old controls can still hold
+// focus inside the departing dialog; that counts as dangling.
+function rescueFocusAfterSheetClose(sheetTestId: string) {
+  void nextTick(() => {
+    const active = document.activeElement
+    const focusSettledElsewhere =
+      active &&
+      active !== document.body &&
+      !active.closest(`[data-testid="${sheetTestId}"]`)
+    if (focusSettledElsewhere) {
+      return
+    }
+    editorShell.value
+      ?.closest('.app-shell')
+      ?.querySelector<HTMLElement>('[data-testid="toolbar-expand-button"]')
+      ?.focus({ preventScroll: true })
+  })
+}
+
+watch(
+  () => props.tableSheetOpen,
+  (open, wasOpen) => {
+    if (!open && wasOpen) {
+      rescueFocusAfterSheetClose('table-insert-sheet')
+    }
+  },
+)
+
+watch(
+  () => props.linkSheetOpen,
+  (open, wasOpen) => {
+    if (!open && wasOpen) {
+      rescueFocusAfterSheetClose('link-insert-sheet')
+    }
+  },
+)
+
+const searchCountText = computed(() => {
+  // A finished replace-all reports its total in the count slot until the
+  // next search action replaces it with live match feedback.
+  if (props.searchReplaceAllCount !== null) {
+    return t('editor.searchReplacedCount', { count: props.searchReplaceAllCount })
+  }
+
+  if (!props.searchQuery) {
+    return ''
+  }
+
+  if (props.searchMatchCount === 0) {
+    return t('editor.searchNoMatches')
+  }
+
+  return t('editor.searchMatchCount', {
+    current: props.searchActiveIndex + 1,
+    total: props.searchMatchCount,
+  })
+})
+
+watch(
+  () => props.searchOpen,
+  open => {
+    if (open) {
+      void nextTick(() => searchInput.value?.focus())
+    }
+  },
+)
+
+const searchReplaceInput = ref<HTMLInputElement | null>(null)
+
+// Expanding the replace row is a statement of intent, so the replace input
+// takes the caret; collapsing hands it back to the find input.
+watch(
+  () => props.searchReplaceOpen,
+  (open, wasOpen) => {
+    if (open) {
+      void nextTick(() => searchReplaceInput.value?.focus())
+    } else if (wasOpen && props.searchOpen) {
+      void nextTick(() => searchInput.value?.focus())
+    }
+  },
+)
+
+watch(editorHost, element => emit('editor-host-change', element), { immediate: true })
+
+onBeforeUnmount(() => {
+  emit('editor-host-change', null)
+})
+</script>
+
+<template>
+  <main class="app-shell">
+    <header
+      v-if="searchOpen"
+      class="top-bar search-bar"
+      data-testid="editor-search-bar"
+      :aria-hidden="linkSheetBackgroundAriaHidden"
+    >
+      <button
+        class="nav-button"
+        type="button"
+        :aria-label="t('editor.searchClose')"
+        data-testid="search-close-button"
+        @click="emit('close-search')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M15 6l-6 6 6 6" />
+        </svg>
+      </button>
+      <div class="search-field">
+        <input
+          ref="searchInput"
+          class="search-input"
+          type="search"
+          data-testid="search-input"
+          :value="searchQuery"
+          :placeholder="t('editor.searchPlaceholder')"
+          :aria-label="t('editor.searchPlaceholder')"
+          enterkeyhint="search"
+          autocapitalize="off"
+          autocomplete="off"
+          spellcheck="false"
+          @input="emit('update:searchQuery', ($event.target as HTMLInputElement).value)"
+          @keydown.enter="handleSearchEnterKeydown($event, () => emit('search-next'))"
+        >
+        <span
+          v-if="searchCountText"
+          class="search-count"
+          :class="{ 'search-count-empty': searchMatchCount === 0 }"
+          data-testid="search-count"
+          aria-live="polite"
+        >
+          {{ searchCountText }}
+        </span>
+      </div>
+      <div class="editor-actions">
+        <button
+          class="icon-button"
+          type="button"
+          :aria-label="t('editor.searchPrevious')"
+          :disabled="searchMatchCount === 0"
+          data-testid="search-previous-button"
+          @click="emit('search-previous')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M6 14l6-6 6 6" />
+          </svg>
+        </button>
+        <button
+          class="icon-button"
+          type="button"
+          :aria-label="t('editor.searchNext')"
+          :disabled="searchMatchCount === 0"
+          data-testid="search-next-button"
+          @click="emit('search-next')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M6 10l6 6 6-6" />
+          </svg>
+        </button>
+        <button
+          class="icon-button search-replace-toggle"
+          type="button"
+          :aria-label="t('editor.searchReplaceToggle')"
+          :aria-expanded="searchReplaceOpen"
+          data-testid="search-replace-toggle"
+          @click="emit('toggle-search-replace')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 7h13" />
+            <path d="M13.5 3.5L17 7l-3.5 3.5" />
+            <path d="M20 17H7" />
+            <path d="M10.5 13.5L7 17l3.5 3.5" />
+          </svg>
+        </button>
+      </div>
+      <div
+        v-if="searchReplaceOpen"
+        class="search-replace-row"
+        data-testid="search-replace-row"
+      >
+        <button
+          class="search-case-toggle"
+          type="button"
+          :aria-label="t('editor.searchMatchCase')"
+          :aria-pressed="searchCaseSensitive"
+          data-testid="search-case-toggle"
+          @click="emit('toggle-search-case')"
+        >
+          Aa
+        </button>
+        <div class="search-field">
+          <input
+            ref="searchReplaceInput"
+            class="search-input"
+            type="text"
+            data-testid="search-replace-input"
+            :value="searchReplaceValue"
+            :placeholder="t('editor.searchReplacePlaceholder')"
+            :aria-label="t('editor.searchReplacePlaceholder')"
+            enterkeyhint="done"
+            autocapitalize="off"
+            autocomplete="off"
+            spellcheck="false"
+            @input="emit('update:searchReplaceValue', ($event.target as HTMLInputElement).value)"
+            @keydown.enter="
+              handleSearchEnterKeydown($event, () => emit('search-replace-current'))
+            "
+          >
+        </div>
+        <button
+          class="search-replace-action"
+          type="button"
+          :disabled="searchMatchCount === 0 || searchActiveIndex < 0"
+          data-testid="search-replace-one-button"
+          @click="emit('search-replace-current')"
+        >
+          {{ t('editor.searchReplaceOne') }}
+        </button>
+        <button
+          class="search-replace-action"
+          type="button"
+          :disabled="searchMatchCount === 0"
+          data-testid="search-replace-all-button"
+          @click="emit('search-replace-all')"
+        >
+          {{ t('editor.searchReplaceAll') }}
+        </button>
+      </div>
+    </header>
+    <header
+      v-else
+      class="top-bar"
+      :aria-hidden="linkSheetBackgroundAriaHidden"
+    >
+      <button
+        class="nav-button"
+        type="button"
+        :aria-label="t('editor.back')"
+        data-testid="back-button"
+        @click="emit('back')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M15 6l-6 6 6 6" />
+        </svg>
+      </button>
+      <div class="document-heading">
+        <h1>{{ documentTitle }}</h1>
+        <p>{{ status }}</p>
+      </div>
+      <div v-if="editorReady" class="editor-actions">
+        <button
+          v-if="!sourceModeActive"
+          class="icon-button"
+          type="button"
+          :aria-label="t('editor.search')"
+          :title="t('editor.search')"
+          data-testid="search-open-button"
+          @click="emit('search')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="11" cy="11" r="6" />
+            <path d="M16 16l4.5 4.5" />
+          </svg>
+        </button>
+        <button
+          v-if="!sourceModeActive"
+          ref="outlineButton"
+          class="icon-button"
+          type="button"
+          :aria-label="t('editor.outline.title')"
+          :title="t('editor.outline.title')"
+          :aria-expanded="outlineOpen"
+          data-testid="outline-open-button"
+          @click="emit('open-outline')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="5" cy="6" r="1.4" fill="currentColor" stroke="none" />
+            <path d="M9 6h10.5" />
+            <circle cx="8.5" cy="12" r="1.4" fill="currentColor" stroke="none" />
+            <path d="M12.5 12h7" />
+            <circle cx="12" cy="18" r="1.4" fill="currentColor" stroke="none" />
+            <path d="M16 18h3.5" />
+          </svg>
+        </button>
+        <button
+          v-if="showEditorActions"
+          class="icon-button"
+          type="button"
+          :aria-label="t('editor.moreActions')"
+          :aria-expanded="editorMenuOpen"
+          data-testid="editor-menu-button"
+          @click="emit('toggle-menu')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="5" r="1.6" />
+            <circle cx="12" cy="12" r="1.6" />
+            <circle cx="12" cy="19" r="1.6" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <section
+      class="editor-pane"
+      :aria-label="t('editor.markdownEditor')"
+      :aria-hidden="linkSheetBackgroundAriaHidden"
+    >
+      <div
+        v-show="!sourceModeActive"
+        ref="editorShell"
+        class="editor-host-shell"
+        :dir="textDirection"
+        :style="editorStyleVars"
+        :aria-busy="!editorReady"
+        :data-testid="editorReady ? 'editor-host' : 'editor-loading-host'"
+      >
+        <div ref="editorHost" class="muya-host" />
+      </div>
+
+      <!-- Source code mode: a plain monospace textarea IS the document while
+           active. Native IME/undo behavior for free; no syntax highlighting
+           by design; colors ride the theme variables. -->
+      <textarea
+        v-if="sourceModeActive"
+        ref="sourceTextarea"
+        class="source-mode-editor"
+        :value="sourceText"
+        :dir="textDirection"
+        :aria-label="t('editor.sourceMode.aria')"
+        data-testid="source-mode-editor"
+        autocapitalize="off"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        @input="onSourceInput"
+      />
+
+      <!-- Non-modal offer: never blocks the editor, never scrolls on its own. -->
+      <Transition name="resume-card">
+        <ResumeCard
+          v-if="resumeCardVisible && !sourceModeActive"
+          :text="resumeCardText"
+          @activate="emit('resume-activate')"
+          @dismiss="emit('resume-dismiss')"
+        />
+      </Transition>
+
+      <!-- Init failed after a transparent retry: a calm recovery surface over
+           the empty host, never a silent dead editor. -->
+      <EditorFailurePanel
+        v-if="editorFailed"
+        @retry="emit('retry-editor')"
+        @back="emit('back')"
+      />
+    </section>
+
+    <MobileSelectionToolbar
+      v-if="!sourceModeActive"
+      :aria-hidden="linkSheetBackgroundAriaHidden"
+      :editor-ready="editorReady"
+      :suspended="selectionToolbarSuspended"
+      :host="editorShell"
+      :can-paste="canPasteSelection"
+      :caret-session="selectionCaretSession"
+      :custom-commands="selectionCustomCommands"
+      :custom-rows="selectionCustomRows"
+      @run-command="
+        (commandId, restoreRange) => emit('run-selection-command', commandId, restoreRange)
+      "
+      @run-custom-command="
+        (commandId, restoreRange) => emit('run-toolbar-command', commandId, restoreRange)
+      "
+      @dismiss-selection="caretRange => emit('dismiss-selection', caretRange)"
+    />
+
+    <LinkActionOverlay
+      v-if="!sourceModeActive"
+      :aria-hidden="linkSheetBackgroundAriaHidden"
+      :editor-ready="editorReady"
+      :suspended="selectionToolbarSuspended"
+      :caret-session="selectionCaretSession"
+      :host="editorShell"
+      :enabled="linkOverlayEnabled"
+      @open="href => emit('open-link', href)"
+    />
+
+    <MobileEditorToolbar
+      v-if="toolbarVisible && !editorFailed && !sourceModeActive"
+      :aria-hidden="linkSheetBackgroundAriaHidden"
+      :expanded="toolbarExpanded"
+      :active-panel="toolbarPanel"
+      :editor-ready="editorReady"
+      :host="editorShell"
+      :compact="toolbarCompact"
+      :quick-commands="quickToolbarCommands"
+      :word-count="wordCount"
+      :character-count="characterCount"
+      :line-count="lineCount"
+      :caret-in-table="toolbarCaretInTable"
+      @run-command="(commandId, restoreRange) => emit('run-toolbar-command', commandId, restoreRange)"
+      @run-table-command="commandId => emit('run-table-command', commandId)"
+      @toggle-expanded="emit('toggle-toolbar')"
+      @set-panel="panel => emit('set-toolbar-panel', panel)"
+    />
+
+    <Transition name="editor-sheet">
+      <EditorActionSheet
+        v-if="editorMenuOpen"
+        :can-share="canShare"
+        :can-export-pdf="canExportPdf"
+        :can-save-to-device="canSaveToDevice"
+        :can-save-copy="canSaveCopy"
+        :sharing="sharing"
+        :exporting-pdf="exportingPdf"
+        :saving-to-device="savingToDevice"
+        :saving-copy="savingCopy"
+        :source-mode-active="sourceModeActive"
+        @close="emit('close-menu')"
+        @toggle-source-mode="onToggleSourceMode"
+        @share="emit('share')"
+        @export-pdf="emit('export-pdf')"
+        @save-to-device="emit('save-to-device')"
+        @save-copy="emit('save-copy')"
+      />
+    </Transition>
+
+    <Transition name="editor-sheet">
+      <OutlineSheet
+        v-if="outlineOpen"
+        :items="outlineItems"
+        @close="emit('close-outline')"
+        @select="slug => emit('select-outline-heading', slug)"
+      />
+    </Transition>
+
+    <Transition name="editor-sheet">
+      <LinkInsertSheet
+        v-if="linkSheetOpen"
+        ref="linkInsertSheet"
+        :text="linkText"
+        :url="linkUrl"
+        @update:text="value => emit('update:linkText', value)"
+        @update:url="value => emit('update:linkUrl', value)"
+        @cancel="emit('close-link-sheet')"
+        @insert="dispatchLinkInsert"
+      />
+    </Transition>
+
+    <Transition name="editor-sheet">
+      <TableInsertSheet
+        v-if="tableSheetOpen"
+        :rows="tableRows"
+        :columns="tableColumns"
+        @update:rows="value => emit('update:tableRows', value)"
+        @update:columns="value => emit('update:tableColumns', value)"
+        @cancel="emit('close-table-sheet')"
+        @insert="emit('insert-table')"
+      />
+    </Transition>
+
+    <Transition name="editor-sheet">
+      <LocalDraftExitPrompt
+        v-if="draftExitPromptOpen"
+        :can-save-to-device="draftCanSaveToDevice"
+        :can-keep-draft="draftCanKeepLocal"
+        :saving="draftSaving"
+        @save-to-device="emit('save-draft-to-device')"
+        @keep="emit('keep-local-draft')"
+        @discard="emit('discard-local-draft')"
+      />
+    </Transition>
+
+    <Transition name="editor-sheet">
+      <AndroidExitPrompt
+        v-if="androidExitPromptOpen"
+        :message="androidExitMessage"
+        :can-save-copy="androidCanSaveCopy"
+        :can-keep-recovery="androidCanKeepRecovery"
+        :saving="androidSaving"
+        @save-copy="emit('save-android-copy')"
+        @keep-recovery="emit('keep-android-recovery')"
+        @discard="emit('discard-android-changes')"
+      />
+    </Transition>
+
+    <Transition name="editor-sheet">
+      <IncomingOpenPrompt
+        v-if="incomingOpenPromptOpen"
+        :incoming-name="incomingOpenName"
+        @keep="emit('keep-incoming')"
+        @discard="emit('discard-incoming')"
+      />
+    </Transition>
+  </main>
+</template>

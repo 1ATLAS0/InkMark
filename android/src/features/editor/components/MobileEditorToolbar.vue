@@ -1,0 +1,900 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { MobileCommandId } from '../../../lib/mobileCommands'
+import {
+  MOBILE_TOOLBAR_EDIT_COMMANDS,
+  MOBILE_TOOLBAR_PANELS,
+  MOBILE_TOOLBAR_TABLE_PANEL,
+  getMobileToolbarPanel,
+  getMobileToolbarPanelCommands,
+  type MobileEditorToolbarPanel,
+  type MobileToolbarCommandButton,
+} from '../../../lib/mobileToolbarConfig'
+import type { TableCommandId } from '../tableCommands'
+import { useI18n, type I18nKey } from '../../../lib/i18n'
+import { captureNonCollapsedSelectionRange } from '../selectionToolbar'
+import { countWords } from '../../../lib/documentState'
+import { getSelectionTextForStats } from '../selectionStats'
+import { createImeVisibilityEstimator, type ImeVisibility } from '../imeVisibility'
+import {
+  addAndroidImeVisibilityListener,
+  getAndroidImeVisibility,
+  isAndroidSelectionControlAvailable,
+} from '../../../lib/androidSelection'
+import ToolbarCommandGlyph from '../../../components/ToolbarCommandGlyph.vue'
+
+const props = defineProps<{
+  expanded: boolean
+  activePanel: MobileEditorToolbarPanel
+  editorReady: boolean
+  host: HTMLElement | null
+  wordCount: number
+  characterCount: number
+  lineCount: number
+  quickCommands: readonly MobileToolbarCommandButton[]
+  compact: boolean
+  caretInTable: boolean
+}>()
+
+const emit = defineEmits<{
+  runCommand: [commandId: MobileCommandId, restoreRange: Range | null]
+  runTableCommand: [commandId: TableCommandId]
+  toggleExpanded: []
+  setPanel: [panel: MobileEditorToolbarPanel]
+}>()
+
+const panels = MOBILE_TOOLBAR_PANELS
+const editCommands = MOBILE_TOOLBAR_EDIT_COMMANDS
+// The table quick strip keeps undo in reach — repeated structure edits
+// and one-step undos are the panel's natural rhythm.
+const quickUndoCommand = MOBILE_TOOLBAR_EDIT_COMMANDS[0]
+const groupMenuOpen = ref(false)
+const { t } = useI18n()
+let lastEditorSelectionRange: Range | null = null
+
+// The seven table-structure commands, in reading order: grow first, then
+// shrink, whole-table removal last (danger-tinted). Icon paths live here
+// because they are structural glyphs unique to this strip.
+const TABLE_STRIP: { id: TableCommandId; titleKey: I18nKey; danger?: boolean; paths: string[] }[] = [
+  { id: 'table-insert-row-above', titleKey: 'toolbar.table.insertRowAbove', paths: ['M4 13.5h16', 'M4 19h16', 'M12 3v6', 'M9 6h6'] },
+  { id: 'table-insert-row-below', titleKey: 'toolbar.table.insertRowBelow', paths: ['M4 5h16', 'M4 10.5h16', 'M12 15v6', 'M9 18h6'] },
+  { id: 'table-insert-column-left', titleKey: 'toolbar.table.insertColumnLeft', paths: ['M13.5 4v16', 'M19 4v16', 'M3 12h6', 'M6 9v6'] },
+  { id: 'table-insert-column-right', titleKey: 'toolbar.table.insertColumnRight', paths: ['M5 4v16', 'M10.5 4v16', 'M15 12h6', 'M18 9v6'] },
+  { id: 'table-delete-row', titleKey: 'toolbar.table.deleteRow', paths: ['M4 6.5h16', 'M4 17.5h16', 'M9 12h6'] },
+  { id: 'table-delete-column', titleKey: 'toolbar.table.deleteColumn', paths: ['M6.5 4v16', 'M17.5 4v16', 'M12 9v6'] },
+  {
+    id: 'table-delete-table',
+    titleKey: 'toolbar.table.deleteTable',
+    danger: true,
+    paths: ['M5 7h14', 'M10 7V4.5h4V7', 'M7 7l1 13h8l1-13', 'M10.5 10.5v6', 'M13.5 10.5v6'],
+  },
+]
+
+const activePanelDef = computed(() =>
+  props.activePanel === 'table' ? MOBILE_TOOLBAR_TABLE_PANEL : getMobileToolbarPanel(props.activePanel),
+)
+const activePanelCommands = computed(() =>
+  props.activePanel === 'table' ? [] : getMobileToolbarPanelCommands(props.activePanel),
+)
+// --- Selection word count (#199, ports upstream marktext#4457): while a
+// selection lives inside the editor host, the stats line appends its
+// word count. Computed here because this component already owns a
+// document-level selectionchange listener; rAF-coalesced so dragging a
+// selection handle pays at most one count per frame.
+
+const selectionWordCount = ref<number | null>(null)
+let selectionCountFrame: number | null = null
+
+const statsText = computed(() => {
+  const stats = t('toolbar.stats', {
+    words: props.wordCount,
+    characters: props.characterCount,
+    lines: props.lineCount,
+  })
+
+  return selectionWordCount.value === null
+    ? stats
+    : `${stats} · ${t('toolbar.statsSelection', { words: selectionWordCount.value })}`
+})
+
+function updateSelectionWordCount() {
+  const selection = document.getSelection()
+  const host = props.host
+  const text = selection && host ? getSelectionTextForStats(selection, host) : ''
+  selectionWordCount.value = text.trim().length > 0 ? countWords(text) : null
+}
+
+function scheduleSelectionWordCount() {
+  if (selectionCountFrame !== null) {
+    return
+  }
+
+  selectionCountFrame = requestAnimationFrame(() => {
+    selectionCountFrame = null
+    updateSelectionWordCount()
+  })
+}
+
+watch(
+  () => props.expanded,
+  expanded => {
+    if (!expanded) {
+      groupMenuOpen.value = false
+    }
+  },
+)
+
+// The Android WebView draws the native caret handle in a compositor layer
+// ABOVE all DOM content — no popup can cover it. Chromium only shows the
+// touch handles for GESTURE-made selections, so re-applying the current
+// selection programmatically hides the handle while the selection, the
+// focus, and therefore the soft keyboard all stay exactly as they were.
+// (Clearing the selection instead would hide the keyboard: with no
+// editable selection the IME dismisses.) The remove+add pair runs in one
+// synchronous task, so no observable empty-selection state exists.
+watch(groupMenuOpen, open => {
+  if (!open) {
+    return
+  }
+
+  // Only while the editor owns focus: the native caret handle this hides
+  // exists only for a focused editable, and re-applying the range via
+  // addRange() would FOCUS the editable (Chromium) — resummoning the
+  // dismissed keyboard the #200 guard just avoided.
+  const active = document.activeElement
+  if (!active || !props.host?.contains(active)) {
+    return
+  }
+
+  const selection = document.getSelection()
+  if (!selection || selection.rangeCount === 0) {
+    return
+  }
+
+  const ranges = Array.from({ length: selection.rangeCount }, (_, i) =>
+    selection.getRangeAt(i),
+  )
+  if (!ranges.some(range => props.host?.contains(range.commonAncestorContainer))) {
+    return
+  }
+
+  const clones = ranges.map(range => range.cloneRange())
+  selection.removeAllRanges()
+  for (const range of clones) {
+    selection.addRange(range)
+  }
+})
+
+// A tap anywhere outside the open panel menu (and its trigger) dismisses
+// it, like any popup — including taps into the document body, which then
+// place the caret as they normally would.
+function dismissGroupMenuFromOutsidePointer(event: PointerEvent) {
+  if (!groupMenuOpen.value || !(event.target instanceof Element)) {
+    return
+  }
+
+  const insideMenu = event.target.closest('[data-testid="mobile-editor-toolbar-panel"]')
+  const onTrigger = event.target.closest('[data-testid="toolbar-group-switcher"]')
+  if (!insideMenu && !onTrigger) {
+    groupMenuOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('selectionchange', rememberCurrentEditorSelection)
+  document.addEventListener('selectionchange', scheduleSelectionWordCount)
+  document.addEventListener('pointerdown', clearEditorSelectionRangeFromEditorPointer, true)
+  document.addEventListener('pointerdown', dismissGroupMenuFromOutsidePointer, true)
+  if (nativeImeVisibilityAvailable) {
+    void installNativeImeVisibility()
+  } else {
+    window.addEventListener('resize', sampleFallbackImeVisibility)
+    sampleFallbackImeVisibility()
+  }
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('selectionchange', rememberCurrentEditorSelection)
+  document.removeEventListener('selectionchange', scheduleSelectionWordCount)
+  document.removeEventListener('pointerdown', clearEditorSelectionRangeFromEditorPointer, true)
+  document.removeEventListener('pointerdown', dismissGroupMenuFromOutsidePointer, true)
+  window.removeEventListener('resize', sampleFallbackImeVisibility)
+  imeListenerGeneration += 1
+  const removeImeListener = nativeImeListenerCleanup
+  nativeImeListenerCleanup = null
+  if (removeImeListener) {
+    void removeImeListener()
+  }
+  if (selectionCountFrame !== null) {
+    cancelAnimationFrame(selectionCountFrame)
+    selectionCountFrame = null
+  }
+})
+
+watch(
+  () => props.host,
+  // Host swaps and editor teardown re-derive the count (a null host
+  // clears it), so a stale selection tally never outlives its editor.
+  () => {
+    rememberCurrentEditorSelection()
+    scheduleSelectionWordCount()
+  },
+)
+
+function rememberCurrentEditorSelection() {
+  const range = captureNonCollapsedSelectionRange(props.host)
+  if (range) {
+    lastEditorSelectionRange = range
+  }
+}
+
+function clearEditorSelectionRangeFromEditorPointer(event: PointerEvent) {
+  if (event.target instanceof Node && props.host?.contains(event.target)) {
+    lastEditorSelectionRange = null
+  }
+}
+
+function runCommand(commandId: MobileCommandId) {
+  if (!props.editorReady) {
+    return
+  }
+
+  emit('runCommand', commandId, lastEditorSelectionRange?.cloneRange() ?? null)
+}
+
+function toggleGroupMenu() {
+  groupMenuOpen.value = !groupMenuOpen.value
+}
+
+function selectPanel(panel: MobileEditorToolbarPanel) {
+  emit('setPanel', panel)
+  groupMenuOpen.value = false
+}
+
+function getCommandTitle(command: { title: string; titleKey: I18nKey }) {
+  return t(command.titleKey) || command.title
+}
+
+// --- Keyboard resummon guard (#200). Every toolbar control prevents
+// pointerdown/mousedown defaults so taps never steal editor focus — but
+// dismissing the IME with Back leaves the editor FOCUSED, and Android
+// Chromium re-shows the keyboard for any page-consumed tap while an
+// editable holds focus. So: when the IME reads hidden, strip
+// editor-owned focus before the tap completes. Navigational controls
+// (expand/collapse, panel switcher, stats) then leave the keyboard
+// down; edit commands restore focus themselves through the
+// restore-range machinery, so their keyboard behavior is unchanged.
+// Muya's cached internal selection survives the blur (the outline and
+// search paths rely on the same contract).
+
+const imeEstimator = createImeVisibilityEstimator()
+const nativeImeVisibilityAvailable = isAndroidSelectionControlAvailable()
+const imeVisibility = ref<ImeVisibility>('unknown')
+let nativeImeListenerCleanup: (() => Promise<void>) | null = null
+let imeListenerGeneration = 0
+let nativeImeEventVersion = 0
+
+function sampleFallbackImeVisibility() {
+  imeVisibility.value = imeEstimator.update(window.innerWidth, window.innerHeight)
+}
+
+async function installNativeImeVisibility() {
+  const generation = ++imeListenerGeneration
+  const cleanup = await addAndroidImeVisibilityListener(({ visible }) => {
+    if (generation === imeListenerGeneration) {
+      nativeImeEventVersion += 1
+      imeVisibility.value = visible ? 'visible' : 'hidden'
+    }
+  })
+
+  if (generation !== imeListenerGeneration) {
+    await cleanup?.()
+    return
+  }
+
+  nativeImeListenerCleanup = cleanup
+  const eventVersionBeforeQuery = nativeImeEventVersion
+  const visible = await getAndroidImeVisibility()
+  if (
+    generation === imeListenerGeneration &&
+    nativeImeEventVersion === eventVersionBeforeQuery &&
+    visible !== null
+  ) {
+    imeVisibility.value = visible ? 'visible' : 'hidden'
+  }
+}
+
+function onToolbarPointerDownCapture() {
+  // Unknown is deliberately non-intervention: native insets have not arrived,
+  // or the viewport fallback has not observed a trustworthy full-height base.
+  if (imeVisibility.value !== 'hidden') {
+    return
+  }
+
+  const active = document.activeElement
+  if (active instanceof HTMLElement && props.host?.contains(active)) {
+    active.blur()
+  }
+}
+</script>
+
+<template>
+  <footer
+    class="mobile-editor-toolbar"
+    :class="{ 'is-expanded': expanded, 'is-compact': compact }"
+    :aria-label="t('toolbar.markdownTools')"
+    data-testid="mobile-editor-toolbar"
+    @pointerdown.capture="onToolbarPointerDownCapture"
+  >
+    <!-- collapsed: quick actions + fixed expand handle. While the caret is
+         in a table, the strip mirrors the expanded TABLE panel — undo plus
+         the seven structure commands — so the caret-contextual switch is
+         visible in BOTH toolbar states, and restores the user's quick
+         commands the moment the caret leaves. -->
+    <div v-if="!expanded" class="toolbar-collapsed">
+      <div
+        class="toolbar-quick-strip"
+        role="toolbar"
+        :aria-label="caretInTable ? t(MOBILE_TOOLBAR_TABLE_PANEL.titleKey) : t('toolbar.quickActions')"
+      >
+        <template v-if="caretInTable">
+          <button
+            class="toolbar-button"
+            type="button"
+            :aria-label="getCommandTitle(quickUndoCommand)"
+            :title="getCommandTitle(quickUndoCommand)"
+            :disabled="!editorReady"
+            :data-command-id="quickUndoCommand.commandId"
+            :data-testid="`toolbar-command-${quickUndoCommand.commandId}`"
+            @pointerdown.prevent
+            @mousedown.prevent
+            @click="runCommand(quickUndoCommand.commandId)"
+          >
+            <ToolbarCommandGlyph :command="quickUndoCommand" />
+          </button>
+          <button
+            v-for="command in TABLE_STRIP"
+            :key="command.id"
+            class="toolbar-button toolbar-table-button"
+            :class="{ 'toolbar-table-danger': command.danger }"
+            type="button"
+            :aria-label="t(command.titleKey)"
+            :title="t(command.titleKey)"
+            :disabled="!editorReady"
+            :data-testid="`toolbar-table-${command.id}`"
+            @pointerdown.prevent
+            @mousedown.prevent
+            @click="emit('runTableCommand', command.id)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path v-for="path in command.paths" :key="path" :d="path" />
+            </svg>
+          </button>
+        </template>
+        <template v-else>
+          <button
+            v-for="command in quickCommands"
+            :key="command.commandId"
+            class="toolbar-button"
+            type="button"
+            :aria-label="getCommandTitle(command)"
+            :title="getCommandTitle(command)"
+            :disabled="!editorReady"
+            :data-command-id="command.commandId"
+            :data-testid="`toolbar-command-${command.commandId}`"
+            @pointerdown.prevent
+            @mousedown.prevent
+            @click="runCommand(command.commandId)"
+          >
+            <ToolbarCommandGlyph :command="command" />
+          </button>
+        </template>
+      </div>
+      <button
+        class="toolbar-expand-handle"
+        type="button"
+        :aria-label="t('toolbar.expand')"
+        :aria-expanded="false"
+        data-testid="toolbar-expand-button"
+        @pointerdown.prevent
+        @mousedown.prevent
+        @click="$emit('toggleExpanded')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M6 15l6-6 6 6" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- expanded: header row + command body -->
+    <div v-else class="toolbar-expanded">
+      <div class="toolbar-header" role="toolbar" :aria-label="t('toolbar.controls')">
+        <button
+          class="toolbar-group-switcher"
+          type="button"
+          :aria-expanded="groupMenuOpen"
+          aria-controls="mobile-editor-toolbar-panel"
+          data-testid="toolbar-group-switcher"
+          @pointerdown.prevent
+          @mousedown.prevent
+          @click="toggleGroupMenu"
+        >
+          <span class="group-switcher-label">{{ t(activePanelDef.labelKey) }}</span>
+          <svg class="group-switcher-caret" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+
+        <div class="toolbar-header-spacer" />
+
+        <button
+          v-for="command in editCommands"
+          :key="command.commandId"
+          class="toolbar-button toolbar-history-button"
+          type="button"
+          :aria-label="getCommandTitle(command)"
+          :title="getCommandTitle(command)"
+          :disabled="!editorReady"
+          :data-command-id="command.commandId"
+          :data-testid="`toolbar-command-${command.commandId}`"
+          @pointerdown.prevent
+          @mousedown.prevent
+          @click="runCommand(command.commandId)"
+        >
+          <ToolbarCommandGlyph :command="command" />
+        </button>
+
+        <button
+          class="toolbar-expand-handle"
+          type="button"
+          :aria-label="t('toolbar.collapse')"
+          :aria-expanded="true"
+          data-testid="toolbar-expand-button"
+          @pointerdown.prevent
+          @mousedown.prevent
+          @click="$emit('toggleExpanded')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+      </div>
+
+      <div
+        id="mobile-editor-toolbar-body"
+        class="toolbar-body"
+        data-testid="mobile-editor-toolbar-body"
+        @pointerdown.prevent
+        @mousedown.prevent
+      >
+        <div class="toolbar-command-strip" role="toolbar" :aria-label="t(activePanelDef.titleKey)">
+          <template v-if="activePanel === 'table'">
+            <button
+              v-for="command in TABLE_STRIP"
+              :key="command.id"
+              class="toolbar-button toolbar-table-button"
+              :class="{ 'toolbar-table-danger': command.danger }"
+              type="button"
+              :aria-label="t(command.titleKey)"
+              :title="t(command.titleKey)"
+              :disabled="!editorReady"
+              :data-testid="`toolbar-table-${command.id}`"
+              @pointerdown.prevent
+              @mousedown.prevent
+              @click="emit('runTableCommand', command.id)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path v-for="path in command.paths" :key="path" :d="path" />
+              </svg>
+            </button>
+          </template>
+          <template v-else>
+            <button
+              v-for="command in activePanelCommands"
+              :key="command.commandId"
+              class="toolbar-button"
+              type="button"
+              :aria-label="getCommandTitle(command)"
+              :title="getCommandTitle(command)"
+              :disabled="!editorReady"
+              :data-command-id="command.commandId"
+              :data-testid="`toolbar-command-${command.commandId}`"
+              @pointerdown.prevent
+              @mousedown.prevent
+              @click="runCommand(command.commandId)"
+            >
+              <ToolbarCommandGlyph :command="command" />
+            </button>
+          </template>
+        </div>
+
+        <p class="toolbar-stats" data-testid="toolbar-document-stats">{{ statsText }}</p>
+      </div>
+
+      <section
+        v-if="groupMenuOpen"
+        id="mobile-editor-toolbar-panel"
+        class="toolbar-group-menu"
+        role="menu"
+        :aria-label="t('toolbar.groups')"
+        data-testid="mobile-editor-toolbar-panel"
+        @pointerdown.prevent
+        @mousedown.prevent
+      >
+        <button
+          v-for="panel in panels"
+          :key="panel.id"
+          class="toolbar-group-option"
+          :class="{ 'is-active': activePanelDef.id === panel.id }"
+          type="button"
+          role="menuitemradio"
+          :aria-checked="activePanelDef.id === panel.id"
+          :data-testid="`toolbar-section-option-${panel.id}`"
+          @click="selectPanel(panel.id)"
+        >
+          <span class="group-option-label">{{ t(panel.labelKey) }}</span>
+          <span class="group-option-title">{{ t(panel.titleKey) }}</span>
+        </button>
+        <button
+          v-if="caretInTable"
+          class="toolbar-group-option"
+          :class="{ 'is-active': activePanel === 'table' }"
+          type="button"
+          role="menuitemradio"
+          :aria-checked="activePanel === 'table'"
+          data-testid="toolbar-section-option-table"
+          @click="selectPanel('table')"
+        >
+          <span class="group-option-label">{{ t(MOBILE_TOOLBAR_TABLE_PANEL.labelKey) }}</span>
+          <span class="group-option-title">{{ t(MOBILE_TOOLBAR_TABLE_PANEL.titleKey) }}</span>
+        </button>
+      </section>
+    </div>
+  </footer>
+</template>
+
+<style scoped>
+.mobile-editor-toolbar {
+  position: relative;
+  z-index: 18;
+  border-top: var(--hairline) solid var(--separator);
+  background: var(--surface);
+}
+
+.toolbar-collapsed {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: stretch;
+  min-height: 50px;
+  padding: 4px 6px calc(env(safe-area-inset-bottom, 0px) + 4px);
+}
+
+.toolbar-quick-strip {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px;
+}
+
+.toolbar-quick-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.toolbar-expanded {
+  display: grid;
+  gap: 2px;
+  padding: 6px 6px calc(env(safe-area-inset-bottom, 0px) + 6px);
+}
+
+.toolbar-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+}
+
+.toolbar-header-spacer {
+  flex: 1 1 auto;
+}
+
+/* The panel switcher is a quiet text control: the commands are the content
+   of this surface, so the switcher gets no resting fill and sits in the
+   muted tier of the same type system. */
+.toolbar-group-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  touch-action: manipulation;
+  transition: background-color var(--dur-standard) var(--ease-out);
+}
+
+.group-switcher-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-switcher-caret {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  stroke: var(--text-muted);
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--dur-standard) var(--ease-out);
+}
+
+.toolbar-group-switcher[aria-expanded='true'] .group-switcher-caret {
+  transform: rotate(180deg);
+}
+
+.toolbar-button,
+.toolbar-expand-handle,
+.toolbar-group-option {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  letter-spacing: 0;
+  touch-action: manipulation;
+  transition:
+    background-color var(--dur-standard) var(--ease-out),
+    color var(--dur-standard) var(--ease-out);
+}
+
+.toolbar-button {
+  flex: 0 0 auto;
+  padding: 0 11px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.toolbar-quick-strip .toolbar-button {
+  padding: 0 13px;
+}
+
+/* Undo/redo are ordinary members of the command system: same box, same
+   icon weight, same states as every other command. */
+.toolbar-history-button {
+  color: var(--text);
+}
+
+.toolbar-table-button {
+  display: grid;
+  place-items: center;
+}
+
+.toolbar-table-button svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Removing the whole table sits one danger tier above row/column deletes;
+   undo (one step) is the safety net — no confirmation dialog. */
+.toolbar-table-danger {
+  color: var(--danger);
+}
+
+.toolbar-table-danger:disabled {
+  color: var(--text-faint);
+}
+
+.toolbar-expand-handle {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.toolbar-expand-handle svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Per-command letterform styling lives in ToolbarCommandGlyph so the
+   Settings quick-bar preview renders the exact same visuals. */
+
+.toolbar-button:active,
+.toolbar-expand-handle:active,
+.toolbar-group-switcher:active,
+.toolbar-group-option:active {
+  background: var(--press);
+  transition-duration: 0ms;
+}
+
+.toolbar-button:focus-visible,
+.toolbar-expand-handle:focus-visible,
+.toolbar-group-switcher:focus-visible,
+.toolbar-group-option:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.toolbar-button:disabled {
+  color: var(--text-faint);
+}
+
+.toolbar-body {
+  display: grid;
+  gap: 4px;
+}
+
+.toolbar-command-strip {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px;
+}
+
+.toolbar-command-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.toolbar-stats {
+  margin: 2px 4px 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.3;
+  font-weight: 400;
+}
+
+.toolbar-group-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 6px;
+  display: grid;
+  gap: 2px;
+  width: min(268px, calc(100vw - 12px));
+  max-height: min(70vh, 388px);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 6px;
+  border: var(--hairline) solid var(--float-border-color);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+  transform-origin: bottom left;
+  animation: toolbar-menu-in var(--dur-standard) var(--ease-out);
+}
+
+@keyframes toolbar-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+.toolbar-group-option {
+  display: grid;
+  gap: 2px;
+  min-height: 52px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm, 10px);
+  text-align: left;
+}
+
+.toolbar-group-option.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.group-option-label {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.006em;
+}
+
+.group-option-title {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbar-group-option.is-active .group-option-title {
+  color: var(--accent-strong);
+}
+
+.mobile-editor-toolbar.is-compact .toolbar-collapsed {
+  grid-template-columns: minmax(0, 1fr) 40px;
+  min-height: 44px;
+  padding-top: 2px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 2px);
+}
+
+.mobile-editor-toolbar.is-compact .toolbar-expanded {
+  gap: 1px;
+  padding-top: 3px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 3px);
+}
+
+.mobile-editor-toolbar.is-compact .toolbar-header {
+  min-height: 40px;
+}
+
+.mobile-editor-toolbar.is-compact .toolbar-button,
+.mobile-editor-toolbar.is-compact .toolbar-expand-handle,
+.mobile-editor-toolbar.is-compact .toolbar-group-option {
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 7px;
+}
+
+.mobile-editor-toolbar.is-compact .toolbar-button {
+  padding: 0 9px;
+  font-size: 13px;
+}
+
+.mobile-editor-toolbar.is-compact .toolbar-quick-strip .toolbar-button {
+  padding: 0 10px;
+}
+
+.mobile-editor-toolbar.is-compact .toolbar-group-switcher {
+  min-height: 36px;
+  padding: 0 9px;
+  font-size: 13px;
+}
+
+.mobile-editor-toolbar.is-compact .toolbar-stats {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toolbar-group-menu {
+    animation: none;
+  }
+}
+
+@media (min-width: 720px) {
+  .toolbar-collapsed,
+  .toolbar-expanded {
+    padding-right: max(24px, calc((100vw - 980px) / 2));
+    padding-left: max(24px, calc((100vw - 980px) / 2));
+  }
+
+  .toolbar-group-menu {
+    left: max(24px, calc((100vw - 980px) / 2));
+  }
+}
+</style>

@@ -1,0 +1,349 @@
+// @vitest-environment happy-dom
+
+import type Content from '../../block/base/content';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Muya } from '../../muya';
+import { MAX_FULL_SEARCH_HIGHLIGHTS } from '../index';
+
+// Coverage for the Search module (src/search/index.ts) — the find/replace
+// engine the desktop "Find in document" / "Find and replace" surfaces drive.
+// The module lives at muya.editor.searchModule and exposes search(value, opts),
+// find('previous'|'next'), and replace(value, {isSingle, isRegexp}). Each match
+// renders a highlight span into the live DOM: the active match gets
+// `span.mu-highlight`, every other match gets `span.mu-selection`
+// (Renderer.getHighlightClassName). block.update() patches the inline DOM
+// synchronously, so the spans are queryable right after the call.
+
+const bootedHosts: HTMLElement[] = [];
+let originalVersion: string | undefined;
+let hadVersion = false;
+
+beforeEach(() => {
+    hadVersion = 'MUYA_VERSION' in window;
+    originalVersion = window.MUYA_VERSION;
+    window.MUYA_VERSION = 'test';
+});
+
+afterEach(() => {
+    while (bootedHosts.length) {
+        const host = bootedHosts.pop()!;
+        host.remove();
+    }
+    if (hadVersion)
+        window.MUYA_VERSION = originalVersion as string;
+    else
+        delete (window as Partial<Window>).MUYA_VERSION;
+});
+
+function bootMuya(markdown: string): Muya {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const muya = new Muya(host, { markdown } as ConstructorParameters<typeof Muya>[1]);
+    muya.init();
+    bootedHosts.push(muya.domNode);
+    return muya;
+}
+
+function placeCursorOnFirstBlock(muya: Muya): Content {
+    const first = muya.editor.scrollPage!.firstContentInDescendant()!;
+    muya.editor.activeContentBlock = first;
+    return first;
+}
+
+function highlightCount(muya: Muya): number {
+    return muya.domNode.querySelectorAll('span.mu-highlight').length;
+}
+
+function selectionCount(muya: Muya): number {
+    return muya.domNode.querySelectorAll('span.mu-selection').length;
+}
+
+describe('search.search()', () => {
+    it('collects every match and highlights the first (one mu-highlight, rest mu-selection)', () => {
+        const muya = bootMuya('apple banana apple cherry\n');
+        placeCursorOnFirstBlock(muya);
+
+        const search = muya.editor.searchModule;
+        search.search('apple');
+
+        expect(search.matches.length).toBe(2);
+        expect(search.index).toBe(0);
+        // First match active, second selected.
+        expect(search.matches[0].start).toBe(0);
+        expect(search.matches[1].start).toBe(13);
+
+        // Active match -> span.mu-highlight, the remaining match -> span.mu-selection.
+        expect(highlightCount(muya)).toBe(1);
+        expect(selectionCount(muya)).toBe(search.matches.length - 1);
+        expect(selectionCount(muya)).toBe(1);
+    });
+
+    it('clears highlights when searching for an empty value', () => {
+        const muya = bootMuya('apple banana apple cherry\n');
+        placeCursorOnFirstBlock(muya);
+
+        const search = muya.editor.searchModule;
+        search.search('apple');
+        expect(highlightCount(muya)).toBe(1);
+
+        search.search('');
+        expect(search.matches.length).toBe(0);
+        expect(search.index).toBe(-1);
+        expect(highlightCount(muya)).toBe(0);
+        expect(selectionCount(muya)).toBe(0);
+    });
+
+    it('keeps an exact large result set but renders only its active match', () => {
+        const markdown = Array.from(
+            { length: MAX_FULL_SEARCH_HIGHLIGHTS + 1 },
+            (_, index) => `x result ${index}`,
+        ).join('\n\n');
+        const muya = bootMuya(markdown);
+        placeCursorOnFirstBlock(muya);
+
+        const search = muya.editor.searchModule;
+        search.search('x');
+
+        expect(search.matches.length).toBe(MAX_FULL_SEARCH_HIGHLIGHTS + 1);
+        expect(highlightCount(muya)).toBe(1);
+        expect(selectionCount(muya)).toBe(0);
+
+        search.find('next');
+        expect(search.index).toBe(1);
+        expect(highlightCount(muya)).toBe(1);
+        expect(selectionCount(muya)).toBe(0);
+    });
+});
+
+describe('search.search() — selectHighlight restores the editor cursor', () => {
+    it('places the cursor on the last active match when closing the search bar (empty value + selectHighlight)', () => {
+        const muya = bootMuya('apple banana apple cherry\n');
+        const block = placeCursorOnFirstBlock(muya);
+
+        const search = muya.editor.searchModule;
+        search.search('apple');
+        // Move the active match to the second "apple" (offset 13-18).
+        search.find('next');
+        expect(search.index).toBe(1);
+
+        // Closing the search bar empties the search with selectHighlight, which
+        // must drop the editor cursor back onto the last active match so the
+        // user can keep typing where the highlight was.
+        search.search('', { selectHighlight: true });
+
+        expect(highlightCount(muya)).toBe(0);
+        expect(muya.editor.activeContentBlock).toBe(block);
+        expect(muya.editor.selection.anchorBlock).toBe(block);
+        expect(muya.editor.selection.focusBlock).toBe(block);
+        expect(muya.editor.selection.anchor!.offset).toBe(13);
+        expect(muya.editor.selection.focus!.offset).toBe(18);
+    });
+});
+
+describe('search.find() — cursor navigation across matches', () => {
+    it('recovers when the configured highlight index is outside the result set', () => {
+        const muya = bootMuya('x and x and x\n');
+        placeCursorOnFirstBlock(muya);
+
+        const search = muya.editor.searchModule;
+        search.search('x', { highlightIndex: 100 });
+
+        expect(search.index).toBe(0);
+        expect(() => search.find('next')).not.toThrow();
+        expect(search.index).toBe(1);
+        expect(highlightCount(muya)).toBe(1);
+    });
+
+    it('wraps forward 0 -> 1 -> 2 -> 0 and backward 0 -> 2, moving the active mu-highlight', () => {
+        const muya = bootMuya('x and x and x\n');
+        placeCursorOnFirstBlock(muya);
+
+        const search = muya.editor.searchModule;
+        search.search('x');
+        expect(search.matches.length).toBe(3);
+        expect(search.index).toBe(0);
+        expect(highlightCount(muya)).toBe(1);
+        expect(selectionCount(muya)).toBe(2);
+
+        // next three times wraps forward: 1, 2, 0
+        search.find('next');
+        expect(search.index).toBe(1);
+        search.find('next');
+        expect(search.index).toBe(2);
+        search.find('next');
+        expect(search.index).toBe(0);
+
+        // The single active highlight follows the index.
+        expect(highlightCount(muya)).toBe(1);
+        expect(selectionCount(muya)).toBe(2);
+
+        // previous from index 0 wraps backward to the last match (2).
+        search.find('previous');
+        expect(search.index).toBe(2);
+        expect(highlightCount(muya)).toBe(1);
+        expect(selectionCount(muya)).toBe(2);
+    });
+
+    it('redraws only the blocks whose active match changed', () => {
+        const muya = bootMuya('x first\n\nx second\n\nx third\n');
+        placeCursorOnFirstBlock(muya);
+
+        const search = muya.editor.searchModule;
+        search.search('x');
+        const blocks = search.matches.map(match => match.block);
+        const updateSpies = blocks.map(block => vi.spyOn(block, 'update'));
+
+        search.find('next');
+
+        expect(updateSpies[0]).toHaveBeenCalledTimes(1);
+        expect(updateSpies[1]).toHaveBeenCalledTimes(1);
+        expect(updateSpies[2]).not.toHaveBeenCalled();
+        expect(highlightCount(muya)).toBe(1);
+        expect(selectionCount(muya)).toBe(2);
+    });
+});
+
+describe('search.replace() — replace all across multiple blocks', () => {
+    it('replaces every occurrence of the needle in every block (replace-all flush)', async () => {
+        const muya = bootMuya('x foo x foo end\n\n# foo here\n\n- foo\n');
+        placeCursorOnFirstBlock(muya);
+
+        const search = muya.editor.searchModule;
+        search.search('foo');
+        // Two in the paragraph, one in the heading, one in the list item.
+        expect(search.matches.length).toBe(4);
+
+        search.replace('BAR', { isSingle: false, isRegexp: false });
+
+        // block.text writes are batched into the json state on the next rAF, so
+        // wait for getMarkdown (which serializes the json state) to settle.
+        await vi.waitFor(() => {
+            const md = muya.getMarkdown();
+            expect(md).not.toContain('foo');
+        });
+
+        const md = muya.getMarkdown();
+        // Paragraph with two occurrences plus trailing text survives intact.
+        expect(md).toContain('x BAR x BAR end');
+        // Heading block.
+        expect(md).toContain('# BAR here');
+        // List item block.
+        expect(md).toContain('- BAR');
+
+        // A fresh search for the old needle finds nothing.
+        search.search('foo');
+        expect(search.matches.length).toBe(0);
+    });
+});
+
+describe('search.replace() — single replace advances past the insertion', () => {
+    it('keeps the classic next-match behavior when the replacement is inert', () => {
+        const muya = bootMuya('cat dog cat dog cat\n');
+        placeCursorOnFirstBlock(muya);
+
+        const search = muya.editor.searchModule;
+        search.search('cat');
+        expect(search.matches.length).toBe(3);
+        expect(search.index).toBe(0);
+
+        // Replacing the first match slides the former second match into
+        // index 0, which stays active.
+        search.replace('bird', { isSingle: true, isRegexp: false });
+        expect(search.matches.length).toBe(2);
+        expect(search.index).toBe(0);
+
+        // Consuming the LAST match steps back to the one before it.
+        search.find('next');
+        expect(search.index).toBe(1);
+        search.replace('bird', { isSingle: true, isRegexp: false });
+        expect(search.matches.length).toBe(1);
+        expect(search.index).toBe(0);
+    });
+
+    it('skips matches the replacement itself contains instead of compounding them', () => {
+        const muya = bootMuya('cat dog cat\n');
+        placeCursorOnFirstBlock(muya);
+
+        const search = muya.editor.searchModule;
+        search.search('cat');
+        expect(search.matches.length).toBe(2);
+        expect(search.index).toBe(0);
+
+        // "wildcat" still contains "cat": the re-search finds it inside the
+        // fresh insertion, and the active match must move PAST it to the
+        // next original occurrence — not sit inside the text just inserted.
+        search.replace('wildcat', { isSingle: true, isRegexp: false });
+        expect(search.matches.length).toBe(2);
+        expect(search.index).toBe(1);
+        expect(search.matches[1].start).toBe('wildcat dog '.length);
+
+        // The second replace consumes the LAST original occurrence. Every
+        // surviving match now sits inside an insertion, so nothing may stay
+        // auto-selected — the earlier clamp left the active match on the cat
+        // inside the second wildcat, where a habitual third tap compounded
+        // it to wildwildcat.
+        search.replace('wildcat', { isSingle: true, isRegexp: false });
+        expect(search.matches.length).toBe(2);
+        expect(search.index).toBe(-1);
+
+        // With no active match a further single replace is a no-op…
+        search.replace('wildcat', { isSingle: true, isRegexp: false });
+
+        // block.text writes land in the json state on flush.
+        muya.editor.jsonState.flush();
+        expect(muya.getMarkdown()).toContain('wildcat dog wildcat');
+        expect(muya.getMarkdown()).not.toContain('wildwildcat');
+
+        // …and the arrows deliberately navigate back into the survivors.
+        search.find('next');
+        expect(search.index).toBe(0);
+    });
+});
+
+describe('search.replace() — undo boundaries under the cutoff/flush sequence', () => {
+    // The mobile find bar wraps every replace in history.cutoff() +
+    // jsonState.flush() + history.cutoff() so each user-visible replace
+    // action is exactly one undo step, never coalesced with neighbours by
+    // the history's time window.
+    function replaceAsBoundary(muya: Muya, value: string, isSingle: boolean) {
+        muya.editor.history.cutoff();
+        muya.editor.searchModule.replace(value, { isSingle, isRegexp: false });
+        muya.editor.jsonState.flush();
+        muya.editor.history.cutoff();
+    }
+
+    it('reverts a whole replace-all in a single undo step', () => {
+        const muya = bootMuya('foo a\n\n# foo b\n\n- foo c\n');
+        placeCursorOnFirstBlock(muya);
+
+        muya.editor.searchModule.search('foo');
+        expect(muya.editor.searchModule.matches.length).toBe(3);
+
+        replaceAsBoundary(muya, 'BAR', false);
+        expect(muya.getMarkdown()).not.toContain('foo');
+
+        muya.undo();
+        const restored = muya.getMarkdown();
+        expect(restored).toContain('foo a');
+        expect(restored).toContain('# foo b');
+        expect(restored).toContain('- foo c');
+    });
+
+    it('keeps two quick single replaces as two separate undo steps', () => {
+        const muya = bootMuya('foo one foo two\n');
+        placeCursorOnFirstBlock(muya);
+
+        muya.editor.searchModule.search('foo');
+        replaceAsBoundary(muya, 'BAR', true);
+        replaceAsBoundary(muya, 'BAR', true);
+        expect(muya.getMarkdown()).toContain('BAR one BAR two');
+
+        // Both replaces ran inside the history's 1s coalescing window; the
+        // explicit cutoffs must still keep them apart.
+        muya.undo();
+        expect(muya.getMarkdown()).toContain('BAR one foo two');
+
+        muya.undo();
+        expect(muya.getMarkdown()).toContain('foo one foo two');
+    });
+});

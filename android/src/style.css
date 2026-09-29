@@ -1,0 +1,1764 @@
+@import './styles/theme-tokens.css';
+@import './styles/themes/graphite-light.css';
+@import './styles/themes/cadmium-dark.css';
+@import './styles/themes/ayu-light.css';
+@import './styles/themes/catppuccin-latte.css';
+@import './styles/themes/classic-light.css';
+@import './styles/themes/everforest-light.css';
+@import './styles/themes/gruvbox-light.css';
+@import './styles/themes/rose-pine-dawn.css';
+@import './styles/themes/solarized-light.css';
+@import './styles/themes/tokyo-night-light.css';
+@import './styles/themes/ulysses.css';
+@import './styles/themes/ayu-dark.css';
+@import './styles/themes/ayu-mirage.css';
+@import './styles/themes/catppuccin-mocha.css';
+@import './styles/themes/cyberdream.css';
+@import './styles/themes/dracula.css';
+@import './styles/themes/everforest-dark.css';
+@import './styles/themes/gruvbox-dark.css';
+@import './styles/themes/horizon-dark.css';
+@import './styles/themes/kanagawa.css';
+@import './styles/themes/material-dark.css';
+@import './styles/themes/monokai-pro.css';
+@import './styles/themes/nightfox.css';
+@import './styles/themes/nord.css';
+@import './styles/themes/one-dark.css';
+@import './styles/themes/oxocarbon-dark.css';
+@import './styles/themes/palenight.css';
+@import './styles/themes/rose-pine.css';
+@import './styles/themes/rose-pine-moon.css';
+@import './styles/themes/solarized-dark.css';
+@import './styles/themes/synthwave-84.css';
+@import './styles/themes/tokyo-night.css';
+@import './styles/themes/tokyo-night-storm.css';
+@import './styles/themes/prism-cadmium.css';
+@import './styles/themes/prism-ayu-light.css';
+@import './styles/themes/prism-catppuccin-latte.css';
+@import './styles/themes/prism-everforest-light.css';
+@import './styles/themes/prism-gruvbox-light.css';
+@import './styles/themes/prism-rose-pine-dawn.css';
+@import './styles/themes/prism-solarized-light.css';
+@import './styles/themes/prism-tokyo-night-light.css';
+@import './styles/themes/prism-ulysses.css';
+@import './styles/themes/prism-ayu-dark.css';
+@import './styles/themes/prism-ayu-mirage.css';
+@import './styles/themes/prism-catppuccin-mocha.css';
+@import './styles/themes/prism-cyberdream.css';
+@import './styles/themes/prism-dracula.css';
+@import './styles/themes/prism-everforest-dark.css';
+@import './styles/themes/prism-gruvbox-dark.css';
+@import './styles/themes/prism-horizon-dark.css';
+@import './styles/themes/prism-kanagawa.css';
+@import './styles/themes/prism-material-dark.css';
+@import './styles/themes/prism-monokai-pro.css';
+@import './styles/themes/prism-nightfox.css';
+@import './styles/themes/prism-nord.css';
+@import './styles/themes/prism-one-dark.css';
+@import './styles/themes/prism-oxocarbon-dark.css';
+@import './styles/themes/prism-palenight.css';
+@import './styles/themes/prism-rose-pine.css';
+@import './styles/themes/prism-rose-pine-moon.css';
+@import './styles/themes/prism-solarized-dark.css';
+@import './styles/themes/prism-synthwave-84.css';
+@import './styles/themes/prism-tokyo-night.css';
+@import './styles/themes/prism-tokyo-night-storm.css';
+
+/*
+ * Graphite Ink layout + shared chrome.
+ *
+ * Hierarchy comes from typography, spacing, and hairlines; boxes and shadows
+ * are reserved for surfaces that genuinely float (sheets, menus, popovers).
+ * Press feedback is instant on touch-down and eases out on release:
+ *   transition: ... var(--dur-standard) var(--ease-out);
+ *   :active { transition-duration: 0ms; background: var(--press); }
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  /* App chrome is never text-selectable, matching native Android apps:
+     long presses drive gestures (home card selection, editor context),
+     and titles, dates, tab labels, or settings rows have no copy value.
+     User content opts back in below. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The two places text selection IS the product: the Muya writing surface
+   (whole surface, not just the contenteditable blocks — dragging across
+   paragraphs passes through non-editable wrappers; Muya's own styles
+   re-disable its decorations) and editable fields, which must keep native
+   selection under a non-selectable ancestor. */
+.mu-container,
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--app-bg);
+}
+
+.app-shell.is-home {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--app-bg);
+}
+
+/* ---------------------------------------------------------------- home */
+
+.home-screen {
+  min-height: 100%;
+  padding: calc(env(safe-area-inset-top, 0px) + 30px) 24px 40px;
+  background: var(--app-bg);
+}
+
+.home-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.home-top h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 23px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.home-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.home-open-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 0 16px;
+  border: var(--hairline) solid var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.006em;
+  touch-action: manipulation;
+  transition:
+    background-color var(--dur-standard) var(--ease-out),
+    transform var(--dur-standard) var(--ease-out);
+}
+
+.home-open-button svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.home-open-button:active {
+  background: var(--press);
+  transform: scale(0.97);
+  transition-duration: 0ms;
+}
+
+.home-open-button:focus-visible,
+.home-new-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.home-new-button {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  box-shadow: var(--shadow-accent);
+  touch-action: manipulation;
+  transition:
+    background-color var(--dur-standard) var(--ease-out),
+    box-shadow var(--dur-standard) var(--ease-out),
+    transform var(--dur-standard) var(--ease-out);
+}
+
+.home-new-button svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.home-new-button:active {
+  /* --accent-hover is the pressed FILL variant; --accent-strong is the
+     accent TEXT role and no longer doubles as a background (its lightened
+     dark-theme values sink the --on-accent glyph below 3:1). */
+  background: var(--accent-hover);
+  box-shadow: none;
+  transform: scale(0.94);
+  transition-duration: 0ms;
+}
+
+.home-notice {
+  max-width: 720px;
+  margin: 20px auto 0;
+  padding: 11px 14px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.home-section-label {
+  max-width: 720px;
+  margin: 32px auto 0;
+  padding: 0 2px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The "show all" expander (#151): a quiet text action closing the Earlier
+   list; present only while older documents are hidden by the recency cap. */
+.home-show-all {
+  display: block;
+  min-height: 44px;
+  margin: 4px auto 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.006em;
+  touch-action: manipulation;
+  transition: background-color var(--dur-standard) var(--ease-out);
+}
+
+.home-show-all:active {
+  background: var(--press);
+  transition-duration: 0ms;
+}
+
+.home-show-all:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Screen-reader-only live region announcing how many rows the expander
+   revealed; visually collapsed but never display:none, which would mute
+   the announcement. */
+.home-reveal-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.home-content {
+  max-width: 720px;
+  margin: 6px auto 0;
+}
+
+.document-group + .document-group {
+  margin-top: 8px;
+}
+
+/* Continue masthead: an editorial block, not a card. The tap target inflates
+   into the gutters so the press tint can wrap the text without a resting box. */
+.continue-card {
+  display: grid;
+  gap: 5px;
+  width: calc(100% + 24px);
+  margin: 4px -12px 0;
+  padding: 12px 12px 14px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  touch-action: manipulation;
+  transition:
+    background-color var(--dur-standard) var(--ease-out),
+    transform var(--dur-standard) var(--ease-out);
+}
+
+.continue-card:active {
+  background: var(--press);
+  transform: scale(0.99);
+  transition-duration: 0ms;
+}
+
+.continue-card:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.continue-card-title {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 21px;
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: -0.014em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.continue-card-meta {
+  display: block;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  line-height: 1.35;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-list {
+  display: grid;
+  gap: 0;
+  width: calc(100% + 24px);
+  margin: 4px -12px 0;
+}
+
+.document-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 62px;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  touch-action: manipulation;
+  transition: background-color var(--dur-standard) var(--ease-out);
+}
+
+.document-row::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 52px;
+  border-bottom: var(--hairline) solid var(--separator);
+}
+
+.document-list .document-row:last-child::after {
+  display: none;
+}
+
+.document-list .document-row:active {
+  background: var(--press);
+  transition-duration: 0ms;
+}
+
+.document-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.document-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--text-faint);
+}
+
+.document-glyph svg {
+  width: 21px;
+  height: 21px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.document-text {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.document-text strong,
+.document-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-text strong {
+  color: var(--text);
+  font-size: 15.5px;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+}
+
+.document-text span {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.3;
+  font-weight: 400;
+}
+
+.empty-recent {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  max-width: 720px;
+  margin: 46px auto 0;
+  padding: 0 4px;
+}
+
+.empty-recent .empty-mark {
+  display: grid;
+  place-items: center;
+  margin-bottom: 2px;
+  color: var(--text-faint);
+}
+
+.empty-recent .empty-mark svg {
+  width: 30px;
+  height: 30px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.empty-recent h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.empty-recent p {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+/* ------------------------------------------------- home selection mode */
+
+.home-top-default {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+}
+
+.home-top-swap-enter-active,
+.home-top-swap-leave-active {
+  transition:
+    opacity var(--dur-quick) var(--ease-out),
+    transform var(--dur-quick) var(--ease-out);
+}
+
+.home-top-swap-enter-from,
+.home-top-swap-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+/* Pulled into the gutters so the round icon targets optically align with the
+   masthead text and action pills. */
+.home-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% + 16px);
+  min-height: 42px;
+  margin: 0 -8px;
+}
+
+.selection-count {
+  min-width: 30px;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.selection-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.selection-icon-button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  touch-action: manipulation;
+  transition:
+    background-color var(--dur-standard) var(--ease-out),
+    transform var(--dur-standard) var(--ease-out);
+}
+
+.selection-icon-button svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.selection-icon-button:active {
+  background: var(--press);
+  transform: scale(0.92);
+  transition-duration: 0ms;
+}
+
+.selection-icon-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.selection-menu-anchor {
+  position: relative;
+}
+
+.selection-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+}
+
+.selection-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 25;
+  display: grid;
+  gap: 2px;
+  min-width: 200px;
+  padding: 6px;
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+  transform-origin: top right;
+}
+
+.selection-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 16px 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.006em;
+  text-align: left;
+  white-space: nowrap;
+  touch-action: manipulation;
+  transition: background-color var(--dur-standard) var(--ease-out);
+}
+
+.selection-menu-item svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--text-muted);
+}
+
+.selection-menu-item:active {
+  background: var(--press);
+  transition-duration: 0ms;
+}
+
+.selection-menu-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.selection-menu-enter-active,
+.selection-menu-leave-active {
+  transition:
+    opacity var(--dur-quick) var(--ease-out),
+    transform var(--dur-quick) var(--ease-out);
+}
+
+.selection-menu-enter-from,
+.selection-menu-leave-to {
+  opacity: 0;
+  transform: scale(0.92) translateY(-4px);
+}
+
+/* Selection indicator: an empty ring that fills with the accent when picked.
+   It replaces the document glyph so rows keep their geometry. */
+.document-check {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  place-self: center;
+  border: 1.6px solid var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: transparent;
+  transition:
+    background-color var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out);
+}
+
+.document-check svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity var(--dur-quick) var(--ease-out),
+    transform var(--dur-standard) var(--ease-spring);
+}
+
+.document-check.is-checked {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.document-check.is-checked svg {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.document-row.is-selected,
+.document-list .document-row.is-selected:active {
+  background: var(--accent-soft);
+}
+
+.document-row.has-pin {
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+}
+
+.document-pin-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--text-faint);
+}
+
+.document-pin-mark svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.continue-card.is-selecting {
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: center;
+}
+
+.continue-card.is-selecting .continue-check {
+  grid-row: 1 / span 2;
+}
+
+.continue-card.is-selecting .continue-card-title,
+.continue-card.is-selecting .continue-card-meta {
+  grid-column: 2;
+}
+
+.continue-card.is-selected,
+.continue-card.is-selected:active {
+  background: var(--accent-soft);
+}
+
+/* ---------------------------------------------------------- editor bar */
+
+.top-bar {
+  position: relative;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 60px;
+  padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px;
+  border-bottom: var(--hairline) solid var(--separator);
+  background: var(--surface);
+}
+
+.nav-button,
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  touch-action: manipulation;
+  transition:
+    background-color var(--dur-standard) var(--ease-out),
+    color var(--dur-standard) var(--ease-out),
+    transform var(--dur-standard) var(--ease-out);
+}
+
+.nav-button svg,
+.icon-button svg {
+  width: 21px;
+  height: 21px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-button svg circle[fill='currentColor'] {
+  fill: currentColor;
+}
+
+.nav-button:active,
+.icon-button:active {
+  background: var(--press);
+  color: var(--text);
+  transform: scale(0.92);
+  transition-duration: 0ms;
+}
+
+.nav-button:focus-visible,
+.icon-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.editor-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+}
+
+/* In-document find bar: replaces the title row inside the same top-bar grid. */
+.top-bar.search-bar {
+  gap: 6px;
+}
+
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  transition: border-color var(--dur-standard) var(--ease-out);
+}
+
+.search-field:focus-within {
+  border-color: var(--accent);
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  /* The input itself is the interactive box — stretch it to the field's
+     full height so taps anywhere in the pill focus it (centered, it would
+     only be one 19px line tall). */
+  align-self: stretch;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.search-input:focus {
+  outline: none;
+}
+
+.search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.search-count {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.search-count-empty {
+  color: var(--text-faint);
+}
+
+/* The expand toggle tints while the replace row is out. */
+.search-replace-toggle[aria-expanded='true'] {
+  color: var(--accent-strong);
+}
+
+/* Replace row: a second full-width top-bar row below the find field —
+   in-place expansion, never a sheet. */
+.search-replace-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+/* Every interactive box on the replace row meets a 44x44 touch floor —
+   width included, since short labels (Aa, All) fall under it on padding
+   alone. These are adjacent, frequently tapped controls (the app's
+   smallest targets elsewhere are the 40px top-bar icons). */
+.search-replace-row .search-field {
+  flex: 1;
+  min-height: 44px;
+}
+
+.search-case-toggle {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: var(--hairline) solid var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  touch-action: manipulation;
+  transition:
+    background-color var(--dur-standard) var(--ease-out),
+    border-color var(--dur-standard) var(--ease-out),
+    color var(--dur-standard) var(--ease-out);
+}
+
+.search-case-toggle[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.search-case-toggle:active {
+  background: var(--press);
+  transition-duration: 0ms;
+}
+
+.search-replace-action {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.006em;
+  touch-action: manipulation;
+  transition: background-color var(--dur-standard) var(--ease-out);
+}
+
+.search-replace-action:disabled {
+  color: var(--text-faint);
+  opacity: 0.55;
+}
+
+.search-replace-action:active {
+  background: var(--press);
+  transition-duration: 0ms;
+}
+
+.search-case-toggle:focus-visible,
+.search-replace-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.icon-button:disabled {
+  color: var(--text-faint);
+  opacity: 0.55;
+}
+
+.document-heading {
+  min-width: 0;
+}
+
+.document-heading span {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.document-heading h1 {
+  overflow: hidden;
+  margin: 3px 0 0;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-heading p {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 400;
+}
+
+/* --------------------------------------------------------- editor pane */
+
+.editor-pane {
+  position: relative;
+  min-height: 0;
+
+  /* The horizontal frame fades in linearly between 840px and 858px so the
+     text measure never jumps or dips: from ~801px the editing column sits
+     at its 700px cap with slack margins, and by 840px the slack exceeds
+     the full 36px frame, so the growing frame is absorbed by the outer
+     margins instead of the measure. */
+  padding: 18px clamp(0px, calc(100vw - 840px), 18px);
+  overflow: hidden;
+}
+
+.editor-host-shell {
+  /* Single owner of the editor's horizontal gutters: Muya's .mu-container
+     pads with var(--editor-gutter) and the host adds NO horizontal padding
+     of its own, so spacing can never stack.
+
+     The gutter is fluid so the text measure is continuous across every
+     width — a hard 16px→50px breakpoint would shrink the measure by ~100px
+     when the viewport grows one pixel (split-screen, foldables, resizable
+     windows). 16px (the Material compact margin) holds up to 720px, then
+     grows 0.4px per viewport px to reach the classic 50px at 805px; the
+     measure itself rises monotonically and caps at the historical 700px
+     (an 800px column minus two 50px gutters) from ~780px on. */
+  --editor-gutter: clamp(16px, calc(16px + (100vw - 720px) * 0.4), 50px);
+
+  width: min(100%, 980px);
+  height: 100%;
+  margin: 0 auto;
+  /* Vertical-only scroll owner. Horizontal overflow must never slide the whole
+     editor: each wide block owns its own horizontal scroll — tables via the
+     figure.mu-table rule below, code and math blocks internally — while images
+     cap at 100% and Muya's floating UI mounts on <body>, so nothing inside
+     needs to scroll the root sideways. */
+  overflow: hidden auto;
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Source code mode (#180): the raw-Markdown textarea standing in for the
+   WYSIWYG surface. Same card geometry as the editor shell so the toggle does
+   not jump; colors ride the theme variables (dark themes included); plain
+   monospace, no syntax highlighting by design — the mode's whole point is
+   the unrendered source. */
+.source-mode-editor {
+  display: block;
+  width: min(100%, 980px);
+  height: 100%;
+  margin: 0 auto;
+  /* Mirrors the shell's fluid gutter (that custom property is scoped to the
+     shell element and cannot be inherited by a sibling). */
+  padding: 20px clamp(16px, calc(16px + (100vw - 720px) * 0.4), 50px);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  font-family: 'DejaVu Sans Mono', 'Roboto Mono', ui-monospace, monospace;
+  font-size: 15px;
+  line-height: 1.6;
+  resize: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  caret-color: var(--accent-strong);
+}
+
+.source-mode-editor:focus {
+  outline: none;
+}
+
+.editor-host-shell .muya-host {
+  min-height: 100%;
+}
+
+.editor-host-shell .mu-editor {
+  min-height: 100%;
+  padding: 42px 0 56px;
+}
+
+/* A wide table scrolls inside its own figure instead of sliding the whole
+   editor. Muya's 10em cell min-width keeps columns readable, so a normal
+   multi-column table is wider than a phone column; the figure clips and scrolls
+   it horizontally while the vertical-only host stays put. Android registers no
+   table drag/resize plugins and Muya's float UI lives on <body>, so nothing is
+   clipped by owning the overflow here. */
+.editor-host-shell figure.mu-table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* MIUI WebViews pin CJK glyphs to one weight: 400 and 700 rasterize to
+   identical pixels at every size and family (device-measured), while Latin
+   bolds fine. Real and synthetic bold are both unavailable, so bold-bearing
+   editor content gets stroke compensation instead; 0.035em matches the ink
+   gain of a real CJK bold face. The flag is set per manufacturer at startup
+   (cjkBoldCompensation.ts). */
+:root[data-cjk-bold-compensation] .mu-editor strong,
+:root[data-cjk-bold-compensation] .mu-editor th,
+:root[data-cjk-bold-compensation] .mu-editor h1,
+:root[data-cjk-bold-compensation] .mu-editor h2,
+:root[data-cjk-bold-compensation] .mu-editor h3,
+:root[data-cjk-bold-compensation] .mu-editor h4,
+:root[data-cjk-bold-compensation] .mu-editor h5,
+:root[data-cjk-bold-compensation] .mu-editor h6 {
+  -webkit-text-stroke: 0.035em currentColor;
+}
+
+/* An active fenced code block draws literal ``` fence markers above and below
+   it (Muya's `pre.mu-active.mu-fenced-code::before/::after`). Their positions
+   are fixed px, but Android WebView applies the user's system font scale as
+   textZoom — it enlarges the marker GLYPHS without scaling the px offsets, so
+   at any non-default font scale the top ``` collides with the language-label
+   field and the bottom ``` laps the box border (device-measured: markers at
+   1.25x width over unscaled 20px/-23px offsets). Pure-CSS alignment is
+   impossible because the glyph width tracks textZoom while the offsets do not.
+   The markers are desktop editing chrome and are redundant on mobile: the box,
+   the editable language label, and the corner "fenced" tag already identify the
+   block, so hide just the two ``` pseudo-markers. Android-scoped on purpose —
+   the vendored Muya CSS still shows them for the desktop build. The higher
+   specificity (extra `.mu-editor`) wins over Muya's own rule, which loads later
+   via the dynamic editor import. */
+.mu-editor pre.mu-active.mu-fenced-code::before,
+.mu-editor pre.mu-active.mu-fenced-code::after {
+  content: none;
+}
+
+.status-bar {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  min-height: 38px;
+  padding: 8px 16px calc(env(safe-area-inset-bottom, 0px) + 8px);
+  border-top: var(--hairline) solid var(--separator);
+  color: var(--text-muted);
+  background: var(--surface);
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 400;
+}
+
+/* ------------------------------------------------------ floating sheets */
+
+.editor-action-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  align-items: end;
+  background: var(--scrim);
+}
+
+.editor-sheet-enter-active,
+.editor-sheet-leave-active {
+  transition: opacity var(--dur-standard) var(--ease-out);
+}
+
+.editor-sheet-enter-active .editor-action-panel,
+.editor-sheet-leave-active .editor-action-panel,
+.editor-sheet-enter-active .draft-save-panel,
+.editor-sheet-leave-active .draft-save-panel {
+  transition: transform var(--dur-gentle) var(--ease-out);
+}
+
+.editor-sheet-enter-from,
+.editor-sheet-leave-to {
+  opacity: 0;
+}
+
+.editor-sheet-enter-from .editor-action-panel,
+.editor-sheet-leave-to .editor-action-panel,
+.editor-sheet-enter-from .draft-save-panel,
+.editor-sheet-leave-to .draft-save-panel {
+  transform: translateY(100%);
+}
+
+.editor-action-panel {
+  width: min(100%, 520px);
+  margin: 0 auto;
+  padding: 10px 14px calc(env(safe-area-inset-bottom, 0px) + 14px);
+  border: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+}
+
+.editor-action-grabber {
+  width: 36px;
+  height: 4px;
+  margin: 2px auto 8px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+.editor-action-title {
+  margin: 4px 6px 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.editor-action-list {
+  display: grid;
+  gap: 2px;
+}
+
+.editor-action-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 54px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.006em;
+  text-align: left;
+  touch-action: manipulation;
+  transition: background-color var(--dur-standard) var(--ease-out);
+}
+
+.editor-action-row:active {
+  background: var(--press);
+  transition-duration: 0ms;
+}
+
+/* Outline sheet: fixed header, only the list scrolls, roughly half-height
+   cap for long outlines while short outlines size to content. */
+.outline-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: 52vh;
+  max-height: 52dvh;
+}
+
+.outline-panel:focus {
+  outline: none;
+}
+
+.outline-header {
+  flex: none;
+}
+
+.outline-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.outline-title {
+  margin: 0 6px;
+}
+
+.outline-list {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-height: 0;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.outline-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 12px;
+  padding-inline-start: calc(12px + var(--outline-indent, 0) * 18px);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  text-align: start;
+  touch-action: manipulation;
+  transition: background-color var(--dur-standard) var(--ease-out);
+}
+
+.outline-row[data-outline-indent='0'] {
+  font-weight: 600;
+}
+
+.outline-row:active {
+  background: var(--press);
+  transition-duration: 0ms;
+}
+
+.outline-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.outline-row-text {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.outline-empty {
+  margin: 12px 6px 10px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Resume card: a compact non-modal chip floating just below the top bar.
+   It must stay far smaller than the editor viewport and never intercept
+   input outside its own pill. */
+.resume-card {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 15;
+  display: flex;
+  align-items: stretch;
+  max-width: min(85%, 420px);
+  border: var(--hairline) solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+  transform: translateX(-50%);
+}
+
+.resume-card-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 6px 4px 6px 14px;
+  border: 0;
+  border-radius: 14px 0 0 14px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  touch-action: manipulation;
+  transition: background-color var(--dur-standard) var(--ease-out);
+}
+
+.resume-card-action:active {
+  background: var(--press);
+  transition-duration: 0ms;
+}
+
+.resume-card-action:focus-visible,
+.resume-card-dismiss:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.resume-card-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  stroke: var(--accent-strong);
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.resume-card-content {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.resume-card-title {
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.resume-card-text {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.resume-card-dismiss {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 0 14px 14px 0;
+  background: transparent;
+  color: var(--text-muted);
+  touch-action: manipulation;
+  transition: background-color var(--dur-standard) var(--ease-out);
+}
+
+.resume-card-dismiss:active {
+  background: var(--press);
+  transition-duration: 0ms;
+}
+
+.resume-card-dismiss svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.resume-card-enter-active,
+.resume-card-leave-active {
+  transition:
+    opacity var(--dur-standard) var(--ease-out),
+    transform var(--dur-standard) var(--ease-out);
+}
+
+.resume-card-enter-from,
+.resume-card-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-8px);
+}
+
+.editor-action-row:disabled {
+  color: var(--text-faint);
+}
+
+.editor-action-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.editor-action-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--accent-strong);
+}
+
+.editor-action-row:disabled .editor-action-icon {
+  color: var(--text-faint);
+}
+
+.editor-action-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.editor-action-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -------------------------------------------------------- exit prompts */
+
+.draft-save-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  align-items: end;
+  background: var(--scrim);
+}
+
+/* ---------------------------------------------------------- save-as flow */
+
+/* Destination screens overlay the still-mounted editor, above every piece
+   of editor chrome (the menu sheet is the tallest at 40). */
+.save-flow-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--app-bg);
+}
+
+/* The screen root is a programmatic focus sink on entry, not a control. */
+.save-flow-screen:focus {
+  outline: none;
+}
+
+/* The flow's own sheets and progress overlays stack above its screens. */
+.save-flow-modal {
+  z-index: 60;
+}
+
+.draft-save-panel {
+  width: min(100%, 520px);
+  margin: 0 auto;
+  padding: 22px 20px calc(env(safe-area-inset-bottom, 0px) + 8px);
+  border: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+}
+
+.draft-save-panel h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.draft-save-panel p {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+.link-insert-panel {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 14px;
+}
+
+.link-field {
+  display: grid;
+  gap: 6px;
+}
+
+.link-field span {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.link-field input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.2;
+  transition:
+    border-color var(--dur-standard) var(--ease-out),
+    background-color var(--dur-standard) var(--ease-out);
+}
+
+.link-field input:focus {
+  border-color: var(--accent);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.table-insert-panel {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 14px;
+}
+
+.table-size-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.table-size-field > span {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.table-size-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.table-step-button {
+  width: 48px;
+  min-height: 48px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  transition: background-color var(--dur-standard) var(--ease-out);
+}
+
+.table-step-button:active:not(:disabled) {
+  background: var(--press);
+}
+
+.table-step-button:disabled {
+  color: var(--text-muted);
+  opacity: 0.45;
+}
+
+.table-size-value {
+  min-width: 44px;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Decision rows: quiet full-width text actions separated by hairlines,
+   not a stack of filled pills. */
+.draft-save-actions {
+  display: grid;
+  gap: 0;
+  margin-top: 20px;
+}
+
+.draft-save-actions button {
+  min-height: 50px;
+  border: 0;
+  border-top: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  /* Sheet actions are text on --surface-raised: --accent-strong is the
+     accent role guaranteed AA there (plain --accent is tuned for fills). */
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 15.5px;
+  font-weight: 500;
+  touch-action: manipulation;
+  transition: background-color var(--dur-standard) var(--ease-out);
+}
+
+.draft-save-actions button:active {
+  background: var(--press);
+  transition-duration: 0ms;
+}
+
+.draft-save-actions button:disabled {
+  color: var(--text-faint);
+}
+
+.draft-save-actions button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.draft-save-actions .primary-action {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.draft-save-actions .danger-action {
+  color: var(--danger);
+}
+
+/* ------------------------------------------------------------- motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-sheet-enter-active,
+  .editor-sheet-leave-active,
+  .editor-sheet-enter-active .editor-action-panel,
+  .editor-sheet-leave-active .editor-action-panel,
+  .editor-sheet-enter-active .draft-save-panel,
+  .editor-sheet-leave-active .draft-save-panel,
+  .home-top-swap-enter-active,
+  .home-top-swap-leave-active,
+  .selection-menu-enter-active,
+  .selection-menu-leave-active,
+  .resume-card-enter-active,
+  .resume-card-leave-active,
+  .document-check,
+  .document-check svg {
+    transition: none;
+  }
+}
+
+/* --------------------------------------------------------- breakpoints */
+
+@media (max-width: 720px) {
+  .home-screen {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .editor-pane {
+    padding: 0;
+  }
+
+  .editor-host-shell {
+    width: 100%;
+    border-width: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .editor-host-shell .mu-editor {
+    padding: 24px 0 48px;
+  }
+
+  .status-bar {
+    justify-content: space-between;
+    gap: 10px;
+  }
+}

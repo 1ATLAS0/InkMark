@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">InkMark</string>
+    <string name="title_activity_main">InkMark</string>
+    <string name="package_name">com.inkmark.app</string>
+    <string name="custom_url_scheme">com.inkmark.app</string>
+</resources>

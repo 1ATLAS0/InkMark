@@ -1,0 +1,130 @@
+apply plugin: 'com.android.application'
+
+def releaseSigningEnvironment = [
+    storeFile: 'ANDROID_RELEASE_KEYSTORE_FILE',
+    storePassword: 'ANDROID_RELEASE_STORE_PASSWORD',
+    keyAlias: 'ANDROID_RELEASE_KEY_ALIAS',
+    keyPassword: 'ANDROID_RELEASE_KEY_PASSWORD'
+]
+def releaseSigningValues = releaseSigningEnvironment.collectEntries { key, variableName ->
+    [(key): System.getenv(variableName)]
+}
+def missingReleaseSigningVariables = releaseSigningValues.findAll { key, value ->
+    value == null || value.trim().isEmpty()
+}.keySet()
+def releaseSigningConfigured = missingReleaseSigningVariables.isEmpty()
+
+android {
+    // namespace 保持上游值：Java 源码位于 io/github/renakoni/marktextandroid 且未显式
+    // import R 类，改 namespace 会让 R 找不到（applicationId 才是安装/商店标识，可独立改）
+    namespace = "io.github.renakoni.marktextandroid"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.inkmark.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 3
+        versionName "0.2.1"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            release {
+                storeFile file(releaseSigningValues.storeFile)
+                storePassword releaseSigningValues.storePassword
+                keyAlias releaseSigningValues.keyAlias
+                keyPassword releaseSigningValues.keyPassword
+            }
+        }
+    }
+    sourceSets {
+        main {
+            // Vendored ICU charset detector (see third_party/icu4j-charset-detector):
+            // the platform's android.icu.text.CharsetDetector is not public SDK.
+            java.srcDirs += '../../third_party/icu4j-charset-detector/java'
+        }
+    }
+    buildTypes {
+        release {
+            if (releaseSigningConfigured) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // The registered RELEASE Android OAuth client (package
+            // io.github.renakoni.marktextandroid + release cert SHA-1).
+            // Its redirect intent-filter lives in src/release.
+            resValue "string", "googledrive_client_id",
+                "432194989716-e1051mgo6dg9j57mcaa7tt1qpo862k1q.apps.googleusercontent.com"
+        }
+        debug {
+            // Debug installs coexist with the release app instead of
+            // replacing it: separate application id, separate data, and a
+            // distinguishable launcher label. Measurement and smoke installs
+            // on a daily-driver device must never touch the real app.
+            applicationIdSuffix ".debug"
+            // The registered debug Android OAuth client (package
+            // io.github.renakoni.marktextandroid.debug + debug keystore
+            // SHA-1). Its redirect intent-filter lives in src/debug.
+            resValue "string", "googledrive_client_id",
+                "432194989716-i513ggpqg5mt3853s584b9o6s4cp159l.apps.googleusercontent.com"
+        }
+    }
+}
+
+def requireReleaseSigning = tasks.register('requireReleaseSigning') {
+    doLast {
+        if (!releaseSigningConfigured) {
+            def names = missingReleaseSigningVariables.collect { key -> releaseSigningEnvironment[key] }
+            throw new GradleException("Release signing is incomplete. Missing environment variables: ${names.join(', ')}")
+        }
+
+        if (!file(releaseSigningValues.storeFile).isFile()) {
+            throw new GradleException("Release keystore not found: ${releaseSigningValues.storeFile}")
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name in ['assembleRelease', 'bundleRelease', 'packageRelease']) {
+        task.dependsOn requireReleaseSigning
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    // Custom Tabs for the cloud OAuth trips (real browser session, in-app feel).
+    implementation "androidx.browser:browser:1.8.0"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    // Real org.json for JVM unit tests; android.jar only carries stubs.
+    testImplementation "org.json:json:20240303"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

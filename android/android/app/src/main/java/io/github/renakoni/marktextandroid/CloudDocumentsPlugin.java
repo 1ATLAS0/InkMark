@@ -1,0 +1,847 @@
+package io.github.renakoni.marktextandroid;
+
+import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.net.Uri;
+import android.util.Log;
+import com.getcapacitor.JSArray;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import java.io.IOException;
+import java.util.Comparator;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+/**
+ * Cloud documents over provider web APIs — no provider app required
+ * (#185 Phase 2: OneDrive, then Google Drive). OAuth runs in the system
+ * browser (embedded WebViews are provider-blocked); the redirect lands back
+ * here through a per-provider intent filter. All network work runs on a
+ * single-thread executor; protocol logic lives in the pure-JVM
+ * {@link OneDriveGraphClient} and {@link GoogleDriveClient}.
+ */
+@CapacitorPlugin(name = "CloudDocuments")
+public class CloudDocumentsPlugin extends Plugin {
+
+    private static final String TAG = "MarkTextAndroid";
+    private static final String PROVIDER_ONEDRIVE = "onedrive";
+    private static final String PROVIDER_GOOGLEDRIVE = "googledrive";
+    private static final String PROVIDER_WEBDAV = "webdav";
+    private static final String CLOUD_PREFS = "cloud_documents";
+    private static final String PREF_ONEDRIVE_TOKENS = "onedrive_tokens";
+    private static final String PREF_ONEDRIVE_PENDING_AUTH = "onedrive_pending_auth";
+    private static final String PREF_GOOGLEDRIVE_TOKENS = "googledrive_tokens";
+    private static final String PREF_GOOGLEDRIVE_PENDING_AUTH = "googledrive_pending_auth";
+    private static final String EVENT_AUTH_COMPLETED = "cloudAuthCompleted";
+    private static final String EVENT_AUTH_PENDING = "cloudAuthPending";
+    private static final String OAUTH_HOST = "oauth";
+    private static final String OAUTH_ONEDRIVE_PATH = "/onedrive";
+    private static final String OAUTH_GOOGLEDRIVE_PATH = "/oauth2redirect";
+
+    private final ExecutorService cloudExecutor = Executors.newSingleThreadExecutor();
+    private final CharsetSniffer cloudCharsetSniffer = new IcuCharsetSniffer();
+    private final HttpTransport cloudTransport = new UrlConnectionTransport();
+    private final OneDriveGraphClient graphClient = new OneDriveGraphClient(cloudTransport);
+    private final GoogleDriveClient driveClient = new GoogleDriveClient(cloudTransport);
+
+    /**
+     * Per-provider wiring for the shared OAuth machinery: the pending/token
+     * storage keys, the redirect shape, and the protocol client calls. The
+     * connect/complete/refresh/disconnect flows themselves are identical
+     * across providers and stay in one copy below.
+     */
+    private abstract class ProviderAuth {
+
+        final String id;
+        final String label;
+        final String pendingPrefKey;
+        final String tokensPrefKey;
+        /**
+         * True from the moment a valid redirect is consumed until its token
+         * exchange emitted a result. connect/disconnect reject while set, so
+         * a user cannot interleave a second sign-in (or a sign-out) with an
+         * exchange that will still save tokens when it lands.
+         */
+        volatile boolean exchangeInFlight = false;
+
+        ProviderAuth(String id, String label, String pendingPrefKey, String tokensPrefKey) {
+            this.id = id;
+            this.label = label;
+            this.pendingPrefKey = pendingPrefKey;
+            this.tokensPrefKey = tokensPrefKey;
+        }
+
+        abstract String clientId();
+
+        abstract String redirectUri();
+
+        abstract boolean matchesRedirect(Uri data);
+
+        /** pickMode: "document" (default) or "folder" (save-as destination). */
+        abstract String authorizeUrl(String state, String codeChallenge, String pickMode);
+
+        abstract CloudTokenStore exchangeCode(String code, String verifier, long nowMillis)
+            throws IOException, CloudProviderException;
+
+        abstract CloudTokenStore refresh(CloudTokenStore tokens, long nowMillis)
+            throws IOException, CloudProviderException;
+
+        /** Best-effort account label; the connection works without it. */
+        abstract String fetchAccountName(String accessToken) throws IOException, CloudProviderException;
+
+        /** Best-effort hook after stored tokens were dropped on disconnect. */
+        void onDisconnect(CloudTokenStore tokens) {}
+    }
+
+    private final ProviderAuth oneDriveAuth = new ProviderAuth(
+        PROVIDER_ONEDRIVE, "OneDrive", PREF_ONEDRIVE_PENDING_AUTH, PREF_ONEDRIVE_TOKENS) {
+
+        @Override
+        String clientId() {
+            return CloudAuthConfig.ONEDRIVE_CLIENT_ID;
+        }
+
+        @Override
+        String redirectUri() {
+            // The package name IS the applicationId (".debug"-suffixed on
+            // debug builds), matching the ${applicationId} manifest scheme.
+            return getContext().getPackageName() + "://" + OAUTH_HOST + OAUTH_ONEDRIVE_PATH;
+        }
+
+        @Override
+        boolean matchesRedirect(Uri data) {
+            return getContext().getPackageName().equals(data.getScheme())
+                && OAUTH_HOST.equals(data.getHost())
+                && OAUTH_ONEDRIVE_PATH.equals(data.getPath());
+        }
+
+        @Override
+        String authorizeUrl(String state, String codeChallenge, String pickMode) {
+            // OneDrive folders are picked in the in-app browser; the OAuth
+            // trip is a plain sign-in regardless of mode.
+            return OneDriveGraphClient.buildAuthorizeUrl(clientId(), redirectUri(), state, codeChallenge);
+        }
+
+        @Override
+        CloudTokenStore exchangeCode(String code, String verifier, long nowMillis)
+            throws IOException, CloudProviderException {
+            return graphClient.exchangeCode(clientId(), redirectUri(), code, verifier, nowMillis).tokens;
+        }
+
+        @Override
+        CloudTokenStore refresh(CloudTokenStore tokens, long nowMillis)
+            throws IOException, CloudProviderException {
+            return graphClient.refresh(clientId(), tokens, nowMillis).tokens;
+        }
+
+        @Override
+        String fetchAccountName(String accessToken) throws IOException, CloudProviderException {
+            OneDriveGraphClient.Account account = graphClient.getAccount(accessToken);
+            return account.userPrincipalName.length() > 0
+                ? account.userPrincipalName
+                : account.displayName;
+        }
+    };
+
+    private final ProviderAuth googleDriveAuth = new ProviderAuth(
+        PROVIDER_GOOGLEDRIVE, "Google Drive", PREF_GOOGLEDRIVE_PENDING_AUTH, PREF_GOOGLEDRIVE_TOKENS) {
+
+        @Override
+        String clientId() {
+            // Per-variant resource: Google binds Android clients to the
+            // package name + signing certificate, so the debug and release
+            // builds cannot share one id and each carries its own. An empty
+            // id reads as provider-unavailable.
+            return getContext().getString(R.string.googledrive_client_id).trim();
+        }
+
+        @Override
+        String redirectUri() {
+            // Google's documented native-app form: the reversed client id
+            // as the scheme, no authority.
+            return GoogleDriveClient.redirectSchemeFor(clientId()) + ":" + OAUTH_GOOGLEDRIVE_PATH;
+        }
+
+        @Override
+        boolean matchesRedirect(Uri data) {
+            // Only auth redirects ever use the reversed-client-id scheme.
+            String scheme = GoogleDriveClient.redirectSchemeFor(clientId());
+            return scheme.length() > 0 && scheme.equals(data.getScheme());
+        }
+
+        @Override
+        String authorizeUrl(String state, String codeChallenge, String pickMode) {
+            // The authorization page hosts the picker itself
+            // (trigger_onepick); the redirect returns picked_file_ids.
+            // "folder" restricts it to folders for save-as destinations.
+            return "folder".equals(pickMode)
+                ? GoogleDriveClient.buildFolderPickerAuthorizeUrl(clientId(), redirectUri(), state, codeChallenge)
+                : GoogleDriveClient.buildPickerAuthorizeUrl(clientId(), redirectUri(), state, codeChallenge);
+        }
+
+        @Override
+        CloudTokenStore exchangeCode(String code, String verifier, long nowMillis)
+            throws IOException, CloudProviderException {
+            return driveClient.exchangeCode(clientId(), redirectUri(), code, verifier, nowMillis).tokens;
+        }
+
+        @Override
+        CloudTokenStore refresh(CloudTokenStore tokens, long nowMillis)
+            throws IOException, CloudProviderException {
+            return driveClient.refresh(clientId(), tokens, nowMillis).tokens;
+        }
+
+        @Override
+        String fetchAccountName(String accessToken) throws IOException, CloudProviderException {
+            return driveClient.getAccountName(accessToken);
+        }
+
+        @Override
+        void onDisconnect(CloudTokenStore tokens) {
+            // Revoking the refresh token retires the whole grant server-side;
+            // the local state is already cleared, so failures only log.
+            cloudExecutor.execute(() -> {
+                try {
+                    if (driveClient.revoke(tokens.refreshToken)) {
+                        Log.i(TAG, "Revoked the Google Drive grant");
+                    } else {
+                        Log.w(TAG, "Google Drive did not confirm the token revocation");
+                    }
+                } catch (IOException ex) {
+                    Log.w(TAG, "Google Drive token revocation failed", ex);
+                }
+            });
+        }
+    };
+
+    @Override
+    public void load() {
+        super.load();
+        Activity activity = getActivity();
+        if (activity != null) {
+            // A cold-start redirect arrives as the launch intent, never
+            // through handleOnNewIntent.
+            maybeCompleteAuth(activity.getIntent());
+        }
+    }
+
+    @Override
+    protected void handleOnNewIntent(Intent intent) {
+        super.handleOnNewIntent(intent);
+        maybeCompleteAuth(intent);
+    }
+
+    @PluginMethod
+    public void getCloudAccountState(PluginCall call) {
+        String provider = call.getString("provider", "");
+        if (PROVIDER_WEBDAV.equals(provider)) {
+            JSObject result = new JSObject();
+            result.put("connected", false);
+            result.put("available", false);
+            result.put("accountName", JSObject.NULL);
+            call.resolve(result);
+            return;
+        }
+        ProviderAuth auth = providerAuthFor(provider);
+        if (auth == null) {
+            call.reject("Unknown cloud provider", "CLOUD_PROVIDER_UNKNOWN");
+            return;
+        }
+
+        CloudTokenStore tokens = readTokens(auth);
+        JSObject result = new JSObject();
+        result.put("connected", tokens != null);
+        result.put("available", auth.clientId().length() > 0);
+        result.put(
+            "accountName",
+            tokens == null || tokens.accountName == null ? JSObject.NULL : tokens.accountName
+        );
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void connectCloudAccount(PluginCall call) {
+        String provider = call.getString("provider", "");
+        if (PROVIDER_WEBDAV.equals(provider)) {
+            call.reject("WebDAV support is not available yet", WebDavCloudClient.NOT_IMPLEMENTED_CODE);
+            return;
+        }
+        ProviderAuth auth = providerAuthFor(provider);
+        if (auth == null) {
+            call.reject("Unknown cloud provider", "CLOUD_PROVIDER_UNKNOWN");
+            return;
+        }
+        if (auth.clientId().length() == 0) {
+            call.reject(
+                "The " + auth.label + " client id is not configured in this build",
+                "CLOUD_CLIENT_ID_MISSING"
+            );
+            return;
+        }
+        if (auth.exchangeInFlight) {
+            call.reject(
+                "The " + auth.label + " sign-in is still completing",
+                "CLOUD_AUTH_IN_PROGRESS"
+            );
+            return;
+        }
+        Activity activity = getActivity();
+        if (activity == null) {
+            call.reject("No Android activity is available", "CLOUD_AUTH_FAILED");
+            return;
+        }
+
+        String verifier = PkceUtil.generateVerifier();
+        String state = PkceUtil.generateVerifier();
+        try {
+            JSONObject pending = new JSONObject();
+            pending.put("state", state);
+            pending.put("verifier", verifier);
+            cloudPrefs().edit().putString(auth.pendingPrefKey, pending.toString()).apply();
+        } catch (JSONException ex) {
+            call.reject("Could not start the " + auth.label + " sign-in", "CLOUD_AUTH_FAILED", ex);
+            return;
+        }
+
+        String authorizeUrl = auth.authorizeUrl(
+            state,
+            PkceUtil.challengeFor(verifier),
+            call.getString("pickMode", "document")
+        );
+        try {
+            // A Custom Tab keeps the browser trip visually inside the app
+            // (slides over it, returns on redirect) while still being the
+            // real system browser with the user's Google/Microsoft session
+            // — embedded WebViews are provider-blocked AND session-less.
+            // Browsers without Custom Tab support open it as a plain link.
+            androidx.browser.customtabs.CustomTabsIntent customTab =
+                new androidx.browser.customtabs.CustomTabsIntent.Builder()
+                    .setShowTitle(true)
+                    .build();
+            customTab.launchUrl(activity, Uri.parse(authorizeUrl));
+        } catch (ActivityNotFoundException ex) {
+            cloudPrefs().edit().remove(auth.pendingPrefKey).apply();
+            call.reject(
+                "No browser is available for the " + auth.label + " sign-in",
+                "CLOUD_BROWSER_UNAVAILABLE",
+                ex
+            );
+            return;
+        }
+
+        Log.i(TAG, "Started " + auth.label + " sign-in in the system browser");
+        JSObject result = new JSObject();
+        result.put("started", true);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void disconnectCloudAccount(PluginCall call) {
+        String provider = call.getString("provider", "");
+        ProviderAuth auth = providerAuthFor(provider);
+        if (auth == null) {
+            call.reject("Unknown cloud provider", "CLOUD_PROVIDER_UNKNOWN");
+            return;
+        }
+        if (auth.exchangeInFlight) {
+            // A disconnect racing the exchange would be undone the moment
+            // the exchange saves its tokens; keep the lifecycle linear.
+            call.reject(
+                "The " + auth.label + " sign-in is still completing",
+                "CLOUD_AUTH_IN_PROGRESS"
+            );
+            return;
+        }
+        CloudTokenStore tokens = readTokens(auth);
+        cloudPrefs()
+            .edit()
+            .remove(auth.tokensPrefKey)
+            .remove(auth.pendingPrefKey)
+            .apply();
+        Log.i(TAG, "Disconnected the " + auth.label + " account");
+        call.resolve(new JSObject());
+        if (tokens != null) {
+            auth.onDisconnect(tokens);
+        }
+    }
+
+    @PluginMethod
+    public void listCloudFolder(PluginCall call) {
+        String provider = call.getString("provider", "");
+        String folderId = call.getString("folderId", "");
+        ProviderAuth auth = requireDocumentProvider(call, provider);
+        if (auth == null) {
+            return;
+        }
+        if (auth != oneDriveAuth) {
+            // Google Drive files are chosen through the Google Picker;
+            // drive.file cannot enumerate a folder the app was never shown.
+            call.reject(
+                auth.label + " does not support in-app folder browsing",
+                "CLOUD_OPERATION_UNSUPPORTED"
+            );
+            return;
+        }
+
+        cloudExecutor.execute(() -> {
+            try {
+                CloudTokenStore tokens = requireFreshTokens(oneDriveAuth);
+                List<OneDriveGraphClient.Entry> entries =
+                    graphClient.listFolder(tokens.accessToken, folderId);
+                entries.sort(
+                    Comparator.comparing((OneDriveGraphClient.Entry entry) -> !entry.isFolder)
+                        .thenComparing(entry -> entry.name, String.CASE_INSENSITIVE_ORDER)
+                );
+
+                JSArray values = new JSArray();
+                for (OneDriveGraphClient.Entry entry : entries) {
+                    JSObject value = new JSObject();
+                    value.put("id", entry.id);
+                    value.put("name", entry.name);
+                    value.put("isFolder", entry.isFolder);
+                    value.put("size", entry.size);
+                    value.put("lastModified", entry.lastModified);
+                    values.put(value);
+                }
+                JSObject result = new JSObject();
+                result.put("entries", values);
+                call.resolve(result);
+            } catch (CloudProviderException ex) {
+                Log.w(TAG, "OneDrive folder listing failed: " + ex.getMessage());
+                call.reject(ex.getMessage(), ex.code, ex);
+            } catch (IOException ex) {
+                Log.w(TAG, "OneDrive folder listing failed", ex);
+                call.reject("Could not reach OneDrive", "CLOUD_NETWORK_FAILED", ex);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void readCloudDocument(PluginCall call) {
+        String provider = call.getString("provider", "");
+        String fileId = call.getString("fileId", "");
+        String defaultEncoding = MarkdownCodec.normalizeEncoding(call.getString("defaultEncoding", "utf8"));
+        boolean autoDetectEncoding = call.getBoolean("autoDetectEncoding", true);
+        ProviderAuth auth = requireDocumentProvider(call, provider);
+        if (auth == null) {
+            return;
+        }
+        if (fileId.length() == 0) {
+            call.reject("A cloud file id is required", "INVALID_CLOUD_FILE_ID");
+            return;
+        }
+
+        cloudExecutor.execute(() -> {
+            try {
+                CloudTokenStore tokens = requireFreshTokens(auth);
+                String name;
+                String versionTag;
+                boolean canWrite;
+                byte[] bytes;
+                if (auth == googleDriveAuth) {
+                    GoogleDriveClient.FileContent file = driveClient.readFile(
+                        tokens.accessToken,
+                        fileId,
+                        MarkdownCodec.MAX_MARKDOWN_BYTES
+                    );
+                    name = file.name;
+                    versionTag = file.headRevisionId;
+                    canWrite = file.canWrite;
+                    bytes = file.bytes;
+                } else {
+                    OneDriveGraphClient.FileContent file = graphClient.readFile(
+                        tokens.accessToken,
+                        fileId,
+                        MarkdownCodec.MAX_MARKDOWN_BYTES
+                    );
+                    name = file.name;
+                    versionTag = file.eTag;
+                    canWrite = true;
+                    bytes = file.bytes;
+                }
+                DecodedMarkdown decoded = MarkdownCodec.decode(
+                    bytes,
+                    defaultEncoding,
+                    autoDetectEncoding,
+                    cloudCharsetSniffer
+                );
+
+                JSObject result = new JSObject();
+                result.put("fileId", fileId);
+                result.put("displayName", name);
+                result.put("markdown", decoded.markdown);
+                result.put("encoding", MarkdownCodec.normalizeEncoding(decoded.encoding));
+                result.put("hasEncodingBom", decoded.hasBom);
+                result.put("eTag", versionTag);
+                result.put("providerName", auth.label);
+                result.put("canWrite", canWrite);
+                Log.i(TAG, "Read " + auth.label + " document: " + safeForLog(name));
+                call.resolve(result);
+            } catch (CloudProviderException ex) {
+                Log.w(TAG, auth.label + " document read failed: " + ex.getMessage());
+                call.reject(ex.getMessage(), ex.code, ex);
+            } catch (DocumentReadException ex) {
+                Log.w(TAG, auth.label + " document read rejected: " + ex.getMessage());
+                call.reject(ex.getMessage(), ex.code, ex);
+            } catch (IOException ex) {
+                Log.w(TAG, auth.label + " document read failed", ex);
+                call.reject("Could not reach " + auth.label, "CLOUD_NETWORK_FAILED", ex);
+            }
+        });
+    }
+
+    /** Save-as: creates a new document in the chosen provider folder. */
+    @PluginMethod
+    public void createCloudDocument(PluginCall call) {
+        String provider = call.getString("provider", "");
+        String parentId = call.getString("parentId", "");
+        String name = call.getString("name", "");
+        String markdown = call.getString("markdown", null);
+        String encoding = MarkdownCodec.normalizeEncoding(call.getString("encoding", "utf8"));
+        boolean writeBom = call.getBoolean("writeBom", false);
+        ProviderAuth auth = requireDocumentProvider(call, provider);
+        if (auth == null) {
+            return;
+        }
+        if (name.trim().length() == 0) {
+            call.reject("A document name is required", "INVALID_CLOUD_FILE_NAME");
+            return;
+        }
+        if (markdown == null) {
+            call.reject("Markdown content is required", "INVALID_MARKDOWN");
+            return;
+        }
+
+        String documentName = name.trim();
+        cloudExecutor.execute(() -> {
+            try {
+                byte[] bytes = MarkdownCodec.validateBytes(
+                    markdown,
+                    new MarkdownWriteOptions(encoding, writeBom)
+                );
+                CloudTokenStore tokens = requireFreshTokens(auth);
+                String fileId;
+                String displayName;
+                String versionTag;
+                String lastModified;
+                if (auth == googleDriveAuth) {
+                    GoogleDriveClient.CreateResult created =
+                        driveClient.createFile(tokens.accessToken, parentId, documentName, bytes);
+                    fileId = created.id;
+                    displayName = created.name;
+                    versionTag = created.headRevisionId;
+                    lastModified = created.lastModified;
+                } else {
+                    OneDriveGraphClient.CreateResult created =
+                        graphClient.createFile(tokens.accessToken, parentId, documentName, bytes);
+                    fileId = created.id;
+                    displayName = created.name;
+                    versionTag = created.eTag;
+                    lastModified = created.lastModified;
+                }
+
+                JSObject result = new JSObject();
+                result.put("fileId", fileId);
+                result.put("displayName", displayName);
+                result.put("eTag", versionTag);
+                result.put("lastModified", lastModified);
+                Log.i(TAG, "Created " + auth.label + " document: " + safeForLog(displayName));
+                call.resolve(result);
+            } catch (CloudProviderException ex) {
+                Log.w(TAG, auth.label + " document create failed: " + ex.getMessage());
+                call.reject(ex.getMessage(), ex.code, ex);
+            } catch (DocumentReadException ex) {
+                Log.w(TAG, auth.label + " document create rejected: " + ex.getMessage());
+                call.reject(ex.getMessage(), ex.code, ex);
+            } catch (IOException ex) {
+                Log.w(TAG, auth.label + " document create failed", ex);
+                call.reject("Could not reach " + auth.label, "CLOUD_NETWORK_FAILED", ex);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void writeCloudDocument(PluginCall call) {
+        String provider = call.getString("provider", "");
+        String fileId = call.getString("fileId", "");
+        String markdown = call.getString("markdown", null);
+        String eTag = call.getString("eTag", "");
+        String encoding = MarkdownCodec.normalizeEncoding(call.getString("encoding", "utf8"));
+        boolean writeBom = call.getBoolean("writeBom", false);
+        ProviderAuth auth = requireDocumentProvider(call, provider);
+        if (auth == null) {
+            return;
+        }
+        if (fileId.length() == 0) {
+            call.reject("A cloud file id is required", "INVALID_CLOUD_FILE_ID");
+            return;
+        }
+        if (markdown == null) {
+            call.reject("Markdown content is required", "INVALID_MARKDOWN");
+            return;
+        }
+
+        cloudExecutor.execute(() -> {
+            try {
+                byte[] bytes = MarkdownCodec.validateBytes(
+                    markdown,
+                    new MarkdownWriteOptions(encoding, writeBom)
+                );
+                CloudTokenStore tokens = requireFreshTokens(auth);
+                String name;
+                String versionTag;
+                String lastModified;
+                if (auth == googleDriveAuth) {
+                    GoogleDriveClient.WriteResult written =
+                        driveClient.writeFile(tokens.accessToken, fileId, bytes, eTag);
+                    name = written.name;
+                    versionTag = written.headRevisionId;
+                    lastModified = written.lastModified;
+                } else {
+                    OneDriveGraphClient.WriteResult written =
+                        graphClient.writeFile(tokens.accessToken, fileId, bytes, eTag);
+                    name = written.name;
+                    versionTag = written.eTag;
+                    lastModified = written.lastModified;
+                }
+
+                JSObject result = new JSObject();
+                result.put("fileId", fileId);
+                result.put("displayName", name);
+                result.put("eTag", versionTag);
+                result.put("lastModified", lastModified);
+                Log.i(TAG, "Wrote " + auth.label + " document: " + safeForLog(name));
+                call.resolve(result);
+            } catch (CloudProviderException ex) {
+                Log.w(TAG, auth.label + " document write failed: " + ex.getMessage());
+                call.reject(ex.getMessage(), ex.code, ex);
+            } catch (DocumentReadException ex) {
+                Log.w(TAG, auth.label + " document write rejected: " + ex.getMessage());
+                call.reject(ex.getMessage(), ex.code, ex);
+            } catch (IOException ex) {
+                Log.w(TAG, auth.label + " document write failed", ex);
+                call.reject("Could not reach " + auth.label, "CLOUD_NETWORK_FAILED", ex);
+            }
+        });
+    }
+
+    private ProviderAuth providerAuthFor(String provider) {
+        if (PROVIDER_ONEDRIVE.equals(provider)) {
+            return oneDriveAuth;
+        }
+        if (PROVIDER_GOOGLEDRIVE.equals(provider)) {
+            return googleDriveAuth;
+        }
+        return null;
+    }
+
+    private ProviderAuth requireDocumentProvider(PluginCall call, String provider) {
+        if (PROVIDER_WEBDAV.equals(provider)) {
+            call.reject("WebDAV support is not available yet", WebDavCloudClient.NOT_IMPLEMENTED_CODE);
+            return null;
+        }
+        ProviderAuth auth = providerAuthFor(provider);
+        if (auth == null) {
+            call.reject("Unknown cloud provider", "CLOUD_PROVIDER_UNKNOWN");
+        }
+        return auth;
+    }
+
+    private void maybeCompleteAuth(Intent intent) {
+        if (intent == null || intent.getData() == null) {
+            return;
+        }
+        Uri data = intent.getData();
+        ProviderAuth auth;
+        if (oneDriveAuth.matchesRedirect(data)) {
+            auth = oneDriveAuth;
+        } else if (googleDriveAuth.matchesRedirect(data)) {
+            auth = googleDriveAuth;
+        } else {
+            return;
+        }
+
+        String pendingSerialized = cloudPrefs().getString(auth.pendingPrefKey, "");
+        if (pendingSerialized.length() == 0) {
+            return;
+        }
+
+        String expectedState;
+        String verifier;
+        try {
+            JSONObject pending = new JSONObject(pendingSerialized);
+            expectedState = pending.optString("state", "");
+            verifier = pending.optString("verifier", "");
+        } catch (JSONException ex) {
+            cloudPrefs().edit().remove(auth.pendingPrefKey).apply();
+            emitAuthResult(auth, false, null, "CLOUD_AUTH_FAILED",
+                "The " + auth.label + " sign-in state was unreadable", null);
+            return;
+        }
+
+        // The state parameter must match BEFORE the pending record is
+        // consumed, on error responses too: the scheme is public, so any
+        // app could fire a forged redirect (e.g. error=access_denied) to
+        // wipe the in-flight verifier and deny the real sign-in. Redirects
+        // that cannot prove they belong to our request are ignored.
+        String state = data.getQueryParameter("state");
+        if (expectedState.length() == 0 || !expectedState.equals(state)) {
+            Log.w(TAG, "Ignored a " + auth.label + " redirect with a mismatched state");
+            return;
+        }
+        // Consuming the record here also deduplicates delivery: the launch
+        // intent can be observed again after handleOnNewIntent ran.
+        cloudPrefs().edit().remove(auth.pendingPrefKey).apply();
+
+        String error = data.getQueryParameter("error");
+        if (error != null && error.length() > 0) {
+            boolean canceled = "access_denied".equals(error);
+            Log.w(TAG, auth.label + " sign-in was not completed: " + safeForLog(error));
+            emitAuthResult(
+                auth,
+                false,
+                null,
+                canceled ? "CLOUD_AUTH_CANCELED" : "CLOUD_AUTH_FAILED",
+                canceled
+                    ? "The " + auth.label + " sign-in was canceled"
+                    : "The " + auth.label + " sign-in failed",
+                null
+            );
+            return;
+        }
+
+        String code = data.getQueryParameter("code");
+        if (code == null || code.length() == 0) {
+            emitAuthResult(auth, false, null, "CLOUD_AUTH_FAILED",
+                "The " + auth.label + " sign-in response was invalid", null);
+            return;
+        }
+
+        // Google's in-flow picker (trigger_onepick) appends the selection
+        // to the same redirect; empty on plain sign-ins and for OneDrive.
+        String pickedSerialized = data.getQueryParameter("picked_file_ids");
+        JSArray pickedFileIds = new JSArray();
+        if (pickedSerialized != null && pickedSerialized.length() > 0) {
+            for (String pickedId : pickedSerialized.split(",")) {
+                if (pickedId.trim().length() > 0) {
+                    pickedFileIds.put(pickedId.trim());
+                }
+            }
+        }
+
+        // The redirect is real and its token exchange is about to run in the
+        // background: tell the web layer NOW, so the sign-in button locks
+        // into a "completing" state instead of reviving when the app merely
+        // becomes visible again (the visibility signal cannot distinguish
+        // "backed out of the browser" from "redirect landed, exchanging").
+        auth.exchangeInFlight = true;
+        JSObject pendingEvent = new JSObject();
+        pendingEvent.put("provider", auth.id);
+        notifyListeners(EVENT_AUTH_PENDING, pendingEvent, true);
+
+        cloudExecutor.execute(() -> {
+            try {
+                CloudTokenStore exchanged = auth.exchangeCode(code, verifier, System.currentTimeMillis());
+                String accountName = null;
+                try {
+                    accountName = auth.fetchAccountName(exchanged.accessToken);
+                } catch (CloudProviderException | IOException ex) {
+                    // The account label is cosmetic; the connection still works.
+                    Log.w(TAG, "Could not read the " + auth.label + " account name", ex);
+                }
+                saveTokens(auth, exchanged.withAccountName(accountName));
+                Log.i(TAG, "Connected the " + auth.label + " account"
+                    + (pickedFileIds.length() > 0 ? " with a picked document" : ""));
+                emitAuthResult(auth, true, accountName, null, null, pickedFileIds);
+            } catch (CloudProviderException ex) {
+                Log.w(TAG, auth.label + " sign-in completion failed: " + ex.getMessage());
+                emitAuthResult(auth, false, null, ex.code, ex.getMessage(), null);
+            } catch (IOException ex) {
+                Log.w(TAG, auth.label + " sign-in completion failed", ex);
+                emitAuthResult(auth, false, null, "CLOUD_NETWORK_FAILED",
+                    "Could not reach " + auth.label, null);
+            }
+        });
+    }
+
+    private void emitAuthResult(
+        ProviderAuth auth,
+        boolean connected,
+        String accountName,
+        String errorCode,
+        String message,
+        JSArray pickedFileIds
+    ) {
+        // Every exchange outcome flows through here; releasing the gate
+        // before the event keeps connect/disconnect available the moment
+        // the web layer learns the result.
+        auth.exchangeInFlight = false;
+        JSObject event = new JSObject();
+        event.put("provider", auth.id);
+        event.put("connected", connected);
+        event.put("accountName", accountName == null ? JSObject.NULL : accountName);
+        if (pickedFileIds != null && pickedFileIds.length() > 0) {
+            event.put("pickedFileIds", pickedFileIds);
+        }
+        if (errorCode != null) {
+            event.put("errorCode", errorCode);
+            event.put("message", message);
+        }
+        notifyListeners(EVENT_AUTH_COMPLETED, event, true);
+    }
+
+    private CloudTokenStore requireFreshTokens(ProviderAuth auth) throws CloudProviderException, IOException {
+        CloudTokenStore tokens = readTokens(auth);
+        if (tokens == null) {
+            throw new CloudProviderException(
+                "CLOUD_NOT_CONNECTED",
+                "No " + auth.label + " account is connected"
+            );
+        }
+        if (tokens.isAccessTokenFresh(System.currentTimeMillis())) {
+            return tokens;
+        }
+
+        try {
+            CloudTokenStore refreshed = auth.refresh(tokens, System.currentTimeMillis());
+            saveTokens(auth, refreshed);
+            return refreshed;
+        } catch (CloudProviderException ex) {
+            if ("CLOUD_AUTH_EXPIRED".equals(ex.code)) {
+                // The refresh token is dead; drop it so the account state
+                // honestly reads disconnected.
+                cloudPrefs().edit().remove(auth.tokensPrefKey).apply();
+            }
+            throw ex;
+        }
+    }
+
+    private CloudTokenStore readTokens(ProviderAuth auth) {
+        return CloudTokenStore.parse(cloudPrefs().getString(auth.tokensPrefKey, ""));
+    }
+
+    private void saveTokens(ProviderAuth auth, CloudTokenStore tokens) {
+        cloudPrefs().edit().putString(auth.tokensPrefKey, tokens.serialize()).apply();
+    }
+
+    private SharedPreferences cloudPrefs() {
+        return getContext().getSharedPreferences(CLOUD_PREFS, Context.MODE_PRIVATE);
+    }
+
+    private String safeForLog(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace('\r', ' ').replace('\n', ' ').trim();
+    }
+
+}
