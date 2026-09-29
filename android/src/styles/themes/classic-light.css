@@ -45,11 +45,11 @@
   --accent-hover: #175A64;
   --accent-soft: #D8EBEE;
   --accent-tint-10: rgba(30, 111, 122, 0.12);
-  --accent-tint-11: rgba(33, 181, 111, 0.14);
+  --accent-tint-11: rgba(30, 111, 122, 0.14);
 
   /* State */
   --danger: #b93e3e;
-  --focus-ring: rgba(33, 181, 111, 0.38);
+  --focus-ring: rgba(30, 111, 122, 0.38);
   --press: rgba(0, 0, 0, 0.08);
   --scrim: rgba(30, 35, 40, 0.42);
 
@@ -59,11 +59,11 @@
     0 12px 32px rgba(40, 44, 48, 0.16),
     0 2px 8px rgba(40, 44, 48, 0.08);
   --shadow-thumb: 0 2px 6px rgba(40, 44, 48, 0.22);
-  --shadow-accent: 0 2px 10px rgba(33, 181, 111, 0.35);
+  --shadow-accent: 0 2px 10px rgba(30, 111, 122, 0.35);
 
   /* Muya bridge — the classic desktop light palette on the writing surface. */
-  --theme-color: #21b56f;
-  --highlight-color: rgba(33, 181, 111, 0.3);
+  --theme-color: #1E6F7A;
+  --highlight-color: rgba(30, 111, 122, 0.3);
   --selection-color: rgba(0, 0, 0, 0.1);
   --editor-color: #4d4d4d;
   --editor-color-80: #333333;
@@ -98,7 +98,7 @@
   --h5-color: #333333;
   --h6-color: #333333;
   --blockquote-text-color: #808080;
-  --blockquote-border-color: #21b56f;
+  --blockquote-border-color: #1E6F7A;
   /* Emphasis keeps the ink color — see graphite-light.css. */
   --strong-color: inherit;
   --em-color: inherit;

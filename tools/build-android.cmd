@@ -22,6 +22,9 @@ REM local.properties 必须用正斜杠；反斜杠在 .properties 里是转义�
 echo [1/4] 安装依赖...
 call npx --yes pnpm@10.33.3 install --no-frozen-lockfile || goto :err
 
+echo [1.5/4] 校验品牌层...
+node "%~dp0rebrand.mjs" || goto :err
+
 echo [2/4] 构建 Web 产物并同步到 Android 工程 (cap sync)...
 call npx --yes pnpm@10.33.3 run android:sync || goto :err
 

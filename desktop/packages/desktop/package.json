@@ -1,13 +1,13 @@
 {
-  "name": "marktext",
-  "version": "0.20.0-dev",
+  "name": "inkmark",
+  "version": "0.20.0",
   "description": "InkMark",
   "productName": "InkMark",
   "main": "./out/main/index.js",
   "author": {
-    "name": "Jocs",
-    "email": "ransixi@gmail.com",
-    "url": "https://github.com/Jocs"
+    "name": "1ATLAS0",
+    "email": "quiteatlas01@gmail.com",
+    "url": "https://github.com/1ATLAS0"
   },
   "maintainer": [
     {

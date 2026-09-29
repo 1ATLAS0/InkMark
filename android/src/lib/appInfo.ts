@@ -1,7 +1,7 @@
 export const APP_INFO = Object.freeze({
   name: 'InkMark',
-  version: '0.2.1',
-  repositoryUrl: 'https://github.com/Renakoni/marktext-android',
-  releasesUrl: 'https://github.com/Renakoni/marktext-android/releases',
-  latestReleaseApiUrl: 'https://api.github.com/repos/Renakoni/marktext-android/releases/latest',
+  version: '0.20.0',
+  repositoryUrl: 'https://github.com/1ATLAS0/InkMark',
+  releasesUrl: 'https://github.com/1ATLAS0/InkMark/releases',
+  latestReleaseApiUrl: 'https://api.github.com/repos/1ATLAS0/InkMark/releases/latest',
 } as const)

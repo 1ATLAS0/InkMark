@@ -13,6 +13,9 @@ cd /d "%~dp0..\desktop"
 echo [1/3] 安装依赖（含 Electron 下载与原生模块重编）...
 call npx --yes pnpm@10.33.4 install --no-frozen-lockfile || goto :err
 
+echo [1.2/3] 校验品牌层（幂等；上游改动导致规则失效时会报错）...
+node "%~dp0rebrand.mjs" || goto :err
+
 echo [1.5/3] 关闭 native-keymap 的 Spectre 库要求（本机未装该 VS 组件）...
 node "%~dp0patch-native-keymap.mjs" || goto :err
 

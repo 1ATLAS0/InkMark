@@ -8,7 +8,20 @@
   大纲、文件树、标签页、主题、HTML / PDF 导出、Pandoc 导出 Word、PicGo 图床、拼写检查、
   自动保存与恢复、中文界面
 
-> 当前状态：**v0.1 PoC 已完成**（双端可运行成品已产出），迭代计划见 [ROADMAP.md](ROADMAP.md)。
+> 当前状态：**v0.2 开发中**（双端成品已产出，更新源与 CI 发版已接入），迭代计划见 [ROADMAP.md](ROADMAP.md)。
+
+## 版本号策略
+
+`0.<上游次版本>.<我方修订>`：`0.20.0` 表示底座与上游 MarkText 0.20 同代，后续我方修订递增为 `0.20.1`、`0.20.2`……
+上游升到 0.21 时跳为 `0.21.0`。这样既能一眼看出底座代次，又能保证升级比较单调递增（自更新依赖语义化版本）。
+
+## 发布流程
+
+打 tag（`v0.20.0` 之类）→ GitHub Actions 自动构建 Windows 安装包与 Android APK → 汇总为 GitHub Release
+（含 `latest.yml` 与 `SHA256SUMS.txt`，桌面端自更新即从此读取）。
+
+Android 正式包签名需要仓库 secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_STORE_PASSWORD`、`ANDROID_KEY_ALIAS`、
+`ANDROID_KEY_PASSWORD`；未配置时 CI 只产出 debug 包（同样可安装）。
 
 ## 下载
 

@@ -3,6 +3,10 @@ productName: InkMark
 directories:
   buildResources: build
   output: ../../dist
+publish:
+  provider: github
+  owner: 1ATLAS0
+  repo: InkMark
 files:
   - '!**/.vscode/*'
   - '!src/*'

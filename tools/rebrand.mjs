@@ -25,6 +25,13 @@ export const BRAND = {
   desktopAppId: 'com.inkmark.desktop',
   androidAppId: 'com.inkmark.app',
   executable: 'inkmark',
+  github: {
+    owner: '1ATLAS0',
+    repo: 'InkMark',
+    get repoUrl() {
+      return `https://github.com/${this.owner}/${this.repo}`
+    },
+  },
 }
 
 // 品牌强调色（来自图标渐变）：teal #1E6F7A
@@ -55,6 +62,16 @@ const OPS = [
     file: join(DESKTOP, 'packages/desktop/package.json'),
     edits: [
       ['"description": "MarkText",', `"description": "${BRAND.name}",\n  "productName": "${BRAND.name}",`],
+      // 内部包名：避免升级缓存目录等仍叫 marktext
+      ['"name": "marktext",', `"name": "${BRAND.executable}",`],
+      ['"name": "inkmark",', `"name": "${BRAND.executable}",`],
+    ],
+  },
+  {
+    file: join(DESKTOP, 'package.json'),
+    edits: [
+      ['"name": "marktext-monorepo"', `"name": "${BRAND.executable}-monorepo"`],
+      ['pnpm --filter marktext', `pnpm --filter ${BRAND.executable}`, true],
     ],
   },
   {
@@ -145,7 +162,16 @@ const OPS = [
   },
   {
     file: join(ANDROID, 'src/lib/appInfo.ts'),
-    edits: [["name: 'MarkText',", `name: '${BRAND.name}',`]],
+    edits: [
+      ["name: 'MarkText',", `name: '${BRAND.name}',`],
+      // 更新检查指向自有仓库（否则会引导用户装回上游版本）
+      ["repositoryUrl: 'https://github.com/Renakoni/marktext-android'", `repositoryUrl: '${BRAND.github.repoUrl}'`],
+      ["releasesUrl: 'https://github.com/Renakoni/marktext-android/releases'", `releasesUrl: '${BRAND.github.repoUrl}/releases'`],
+      [
+        "latestReleaseApiUrl: 'https://api.github.com/repos/Renakoni/marktext-android/releases/latest'",
+        `latestReleaseApiUrl: 'https://api.github.com/repos/${BRAND.github.owner}/${BRAND.github.repo}/releases/latest'`,
+      ],
+    ],
   },
   // 默认浅色固定主题切到 classic-light（再把它染成品牌色）
   {
@@ -155,8 +181,8 @@ const OPS = [
   {
     file: join(ANDROID, 'src/styles/themes/classic-light.css'),
     edits: [
-      [LEGACY_GREEN_HEX, ACCENT_HEX],
-      [LEGACY_GREEN_RGB, ACCENT_RGB],
+      [LEGACY_GREEN_HEX, ACCENT_HEX, true],
+      [LEGACY_GREEN_RGB, ACCENT_RGB, true],
       ['--accent: #188652;', '--accent: #17606B;'],
       ['--accent-strong: #136c42;', '--accent-strong: #124E57;'],
       ['--accent-hover: #167c4c;', '--accent-hover: #175A64;'],
