@@ -1,0 +1,13 @@
+# 工作区根仓库：只跟踪脚本与演示文件；两个上游 fork 各自独立成库
+node_modules/
+.toolchain/
+release/
+vibe_images/
+tools/preview/
+tools/keystore/
+
+# 两个 fork（各自有 .git）与上游原始克隆
+desktop/
+android/
+upstream-marktext/
+upstream-marktext-android/
