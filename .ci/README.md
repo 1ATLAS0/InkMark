@@ -1,7 +1,7 @@
 # CI 状态
 
-最近一次运行: 36655234116
+最近一次运行: 36656421743
 
-- desktop: failure
+- desktop: success
 - android: success
-- ref: v0.20.0-rc4
+- ref: v0.20.0-rc5
