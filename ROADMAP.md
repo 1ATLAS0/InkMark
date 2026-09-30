@@ -91,7 +91,11 @@
 - [x] 更新链路闭环
   - [x] 桌面：`electron-builder.yml` 增加 `publish: github(1ATLAS0/InkMark)`，生成 `app-update.yml`
   - [x] 安卓：`src/lib/appInfo.ts` 的 `releasesUrl` / `latestReleaseApiUrl` 改为自有仓库
-  - [ ] 双端各跑一次"旧版 → 检测到新版 → 更新"演练（待首个 Release 落地后做）
+  - [x] Release 链路打通：`v0.20.4` 已发布，含 Windows 安装包/免安装包 + Android APK + `latest.yml` + `SHA256SUMS.txt`
+        （`latest.yml` 匿名可下载、版本号 0.20.4 高于已装版本 → 桌面自更新可读到新版本）
+  - [ ] 双端"旧版 → 检测到新版 → 更新"UI 级演练（安装包级验证待做）
+  - [ ] **Android 正式签名 APK 进 Release**：仓库 secrets 未配置时 CI 只产出 debug 包；
+        需加 `ANDROID_KEYSTORE_BASE64` / `ANDROID_STORE_PASSWORD` / `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD`
 - [x] 元数据
   - [x] `author` / `CompanyName` → 1ATLAS0；版本号统一 0.20.1
   - [ ] 申请代码签名证书（Windows：Azure Trusted Signing，**需先核实中国开发者资格**；备选 OV 证书）
