@@ -29,8 +29,9 @@ Open:
   a debug-signed APK.
 - **Update round trip.** Installing an older build and confirming that it detects and applies a newer
   release has not been tested end to end.
-- **Input methods.** Microsoft Pinyin and Sogou on Windows, Gboard, Sogou, Baidu and the Huawei
-  keyboard on Android, all untested.
+- **Input methods.** Chinese composition through the system IME was checked on one Android device
+  (vivo, Android 16): text commits correctly, no input-connection errors in the logs. Windows IMEs
+  and other Android keyboards remain untested.
 - **Encoding.** GB18030/GBK detection and CRLF handling need a test pass with real files.
 
 ## 0.21 — editing and export
