@@ -181,12 +181,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 非正式版本（含 -rc/-alpha/-beta）自动标记为 pre-release，避免自更新误推
+          set -x
+          echo "ref=$GITHUB_REF_NAME repo=$GITHUB_REPOSITORY"
+          gh --version | head -1
+          ls -la release/
           PRE=""
           case "$GITHUB_REF_NAME" in
             *-rc*|*-alpha*|*-beta*) PRE="--prerelease" ;;
           esac
           gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
             --title "InkMark $GITHUB_REF_NAME" \
             --generate-notes $PRE \
             release/*
@@ -196,7 +200,7 @@ jobs:
   #   git ls-remote origin refs/heads/ci-status   /   git fetch origin ci-status
   report:
     name: report status
-    needs: [desktop, android]
+    needs: [desktop, android, publish]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     permissions:
@@ -210,6 +214,7 @@ jobs:
         env:
           DESKTOP: ${{ needs.desktop.result }}
           ANDROID: ${{ needs.android.result }}
+          PUBLISH: ${{ needs.publish.result }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
@@ -222,6 +227,7 @@ jobs:
             "runId": "${GITHUB_RUN_ID}",
             "desktop": "${DESKTOP}",
             "android": "${ANDROID}",
+            "publish": "${PUBLISH}",
             "url": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
             "at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
@@ -230,7 +236,7 @@ jobs:
             "${GITHUB_RUN_ID}" "${DESKTOP}" "${ANDROID}" "${GITHUB_REF_NAME}" > .ci/README.md
 
           # 失败时把失败步骤的日志抓下来（私有仓库外部看不到 Actions 日志，这里是最快的排查通道）
-          if [ "${DESKTOP}" != "success" ] || [ "${ANDROID}" != "success" ]; then
+          if [ "${DESKTOP}" != "success" ] || [ "${ANDROID}" != "success" ] || [ "${PUBLISH}" != "success" ]; then
             gh run view "${GITHUB_RUN_ID}" --log-failed > .ci/failed.log 2>&1 || true
             echo "--- 失败日志尾部 ---"
             tail -c 8000 .ci/failed.log || true
@@ -241,5 +247,5 @@ jobs:
           git config user.name "inkmark-ci"
           git config user.email "ci@inkmark.local"
           git add -A .ci
-          git commit -m "ci: ${GITHUB_REF_NAME} desktop=${DESKTOP} android=${ANDROID}" || echo "无变化"
+          git commit -m "ci: ${GITHUB_REF_NAME} desktop=${DESKTOP} android=${ANDROID} publish=${PUBLISH}" || echo "无变化"
           git push -f origin ci-status
