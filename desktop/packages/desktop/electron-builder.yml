@@ -157,7 +157,7 @@ dmg:
 linux:
   artifactName: 'inkmark-linux-${version}.${ext}'
   executableName: 'inkmark'
-  description: 'InkMark - a free Markdown editor with live preview (Typora-style).'
+  description: 'InkMark - a free, open-source Markdown editor with inline live preview.'
   maintainer: 'InkMark Contributors'
   category: 'Office;TextEditor;Utility'
   mimeTypes:

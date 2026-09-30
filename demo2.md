@@ -1,9 +1,9 @@
-# Mermaid 与代码块验证
+# 流程图与代码块示例
 
 ```mermaid
 graph LR
   A[Markdown 源文件] --> B{Muya 引擎}
-  B --> C[实时渲染视图]
+  B --> C[渲染视图]
   B --> D[导出 HTML / PDF / Word]
 ```
 
@@ -14,8 +14,9 @@ function greet(name) {
 console.log(greet('InkMark'))
 ```
 
-- [x] 桌面端打包（Windows x64）
-- [x] 安卓端打包（APK 已签名）
-- [ ] 麒麟 ARM64 构建
+- [x] Windows 桌面端打包
+- [x] Android 端打包
+- [ ] Linux arm64 构建
+- [ ] 输入法验证
 
-> 引用块：桌面与手机共用同一套 Muya 渲染引擎。
+> 引用块示例：桌面端与 Android 端共用同一套渲染引擎。

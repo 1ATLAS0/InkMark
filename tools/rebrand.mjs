@@ -52,7 +52,7 @@ const OPS = [
       ["executableName: 'marktext'", `executableName: '${BRAND.executable}'`],
       ["artifactName: 'marktext-", `artifactName: '${BRAND.executable}-`, true],
       ["description: 'A simple and elegant open-source markdown editor that focused on speed and usability.'",
-        `description: '${BRAND.name} - a free Markdown editor with live preview (Typora-style).'`],
+        `description: '${BRAND.name} - a free, open-source Markdown editor with inline live preview.'`],
       ["maintainer: 'MarkText Contributors'", `maintainer: '${BRAND.name} Contributors'`],
       ["StartupWMClass: 'marktext'", `StartupWMClass: '${BRAND.executable}'`],
       ["Keywords: 'marktext;'", `Keywords: '${BRAND.executable};'`],

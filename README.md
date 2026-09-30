@@ -1,84 +1,91 @@
 # InkMark
 
-免费、开源的 Markdown 编辑器，目标是在功能上对齐 Typora，并同时提供**桌面端与 Android 端**。
+InkMark is a free, open-source Markdown editor for Windows, Linux, macOS and Android. Documents are
+edited and rendered in one view: block markup stays visible while the cursor is inside a block and
+collapses into formatted text when the cursor leaves it.
 
-- 桌面：Electron + [Muya](https://github.com/marktext/muya) 引擎（实时预览 / 所见即所得）
-- Android：Capacitor + 同一 Muya 引擎 → **双端渲染完全一致**
-- 支持：CommonMark / GFM、表格、KaTeX 数学公式、Mermaid 流程图、代码高亮、任务列表、
-  大纲、文件树、标签页、主题、HTML / PDF 导出、Pandoc 导出 Word、PicGo 图床、拼写检查、
-  自动保存与恢复、中文界面
+[中文说明](README.zh-CN.md) · [Roadmap](ROADMAP.md) · [Releases](https://github.com/1ATLAS0/InkMark/releases)
 
-> 当前状态：**v0.2 开发中**（双端成品已产出，更新源与 CI 发版已接入），迭代计划见 [ROADMAP.md](ROADMAP.md)。
+## Features
 
-## 版本号策略
+The desktop application is built with Electron; the Android application is built with Capacitor.
+Both embed the same editor engine (Muya), so a document renders identically on either platform.
 
-`0.<上游次版本>.<我方修订>`：`0.20.0` 表示底座与上游 MarkText 0.20 同代，后续我方修订递增为 `0.20.1`、`0.20.2`……
-上游升到 0.21 时跳为 `0.21.0`。这样既能一眼看出底座代次，又能保证升级比较单调递增（自更新依赖语义化版本）。
+- Markdown: CommonMark and GFM, tables, task lists, footnotes, YAML front matter, emoji
+- KaTeX math, Mermaid and flowchart diagrams, syntax highlighting, code block options
+- File tree, outline, tabs, themes, source / focus / typewriter modes
+- Export to HTML and PDF, and to Word and other formats through Pandoc
+- Images: paste or drag in, copy to a local `assets` folder, or upload through PicGo and
+  compatible command-line uploaders
+- Autosave with crash recovery, spell checking, command palette, Chinese interface
 
-## 发布流程
+## Status
 
-打 tag（`v0.20.0` 之类）→ GitHub Actions 自动构建 Windows 安装包与 Android APK → 汇总为 GitHub Release
-（含 `latest.yml` 与 `SHA256SUMS.txt`，桌面端自更新即从此读取）。
+In development. Windows installers, a portable ZIP and Android APKs are attached to every release
+published from this repository. Planned work and known problems are tracked in [ROADMAP.md](ROADMAP.md).
 
-Android 正式包签名需要仓库 secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_STORE_PASSWORD`、`ANDROID_KEY_ALIAS`、
-`ANDROID_KEY_PASSWORD`；未配置时 CI 只产出 debug 包（同样可安装）。
+## Install
 
-## 下载
+Download the latest build from [Releases](https://github.com/1ATLAS0/InkMark/releases).
 
-见 [Releases](https://github.com/1ATLAS0/InkMark/releases)。
+- Windows: `inkmark-win-x64-<version>-setup.exe` (installer) or `inkmark-win-x64-<version>.zip`
+  (portable, unpack and run)
+- Android: `InkMark-<version>-android.apk`. Installation requires allowing installs from unknown
+  sources.
+- macOS and Linux packages are not built yet.
 
-- Windows：`InkMark-*-setup-win-x64.exe`（安装版）或 `-portable.zip`（免安装）
-- Android：`InkMark-*-android.apk`（需允许"未知来源"安装）
+## Build from source
 
-## 从源码构建
+Requirements: Node.js 20 or newer, pnpm 10 (`npx pnpm@10` works without a global install), and
+Python 3 for icon generation.
 
-前置：Node 20+、pnpm（用 `npx pnpm@10` 亦可）、Python 3（生成图标）
+Desktop (Windows):
 
-### Windows 桌面
+    tools\build-desktop.cmd
 
-```
-tools\build-desktop.cmd
-```
+Android:
 
-需要 Visual Studio 2019 BuildTools（含 C++ 工具链）。脚本内部已固化必要环境：
+    tools\build-android.cmd
 
-- 强制 `msvs_version=2019`（部分 VS2022 安装的 VC 组件未注册到 vswhere，会导致 node-gyp 找不到编译器）
-- Electron 使用 npmmirror 镜像下载
-- `tools/patch-native-keymap.mjs` 关闭 `native-keymap` 的 Spectre 库要求（未安装该 VS 组件时必需）
+Toolchain notes:
 
-### Android
+- The desktop build needs Visual Studio with the C++ toolchain. The script sets
+  `msvs_version=2019` because some VS2022 installations do not register the VC components that
+  node-gyp resolves through vswhere, which makes the compiler lookup fail.
+- Electron binaries are downloaded from the npmmirror mirror.
+- `tools/patch-native-keymap.mjs` removes the Spectre-mitigated library requirement of
+  `native-keymap`; that component is not installed by every Visual Studio workload.
+- The Android build needs JDK 21 (Capacitor 8 compiles against Java 21) and an Android SDK with
+  `platforms;android-36` and `build-tools;36.0.0`.
+- APK signing: `tools\make-keystore.cmd` creates a keystore and `tools\sign-apk.cmd` signs an APK.
+  Keystores and passwords are not stored in the repository; CI reads them from repository secrets
+  (`ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+  `ANDROID_KEY_PASSWORD`). Without those secrets the release workflow publishes a debug-signed APK.
 
-```
-tools\build-android.cmd
-```
+## Repository layout
 
-需要 **JDK 21**（Capacitor 8 的 `sourceCompatibility` 为 21）、Android SDK（platforms;android-36、build-tools;36.0.0）。
-签名相关：`tools\make-keystore.cmd` 生成 keystore，`tools\sign-apk.cmd` 签名。
+    desktop/    Electron application
+    android/    Capacitor application
+    tools/      build, branding, signing and measurement scripts
+    demo*.md    documents used to check rendering output
+    ROADMAP.md  milestones, known issues and release process
 
-## 目录结构
+## Branding
 
-```
-desktop/   Electron 桌面端（fork 自 marktext/marktext，MIT）
-android/   Android 端（fork 自 Renakoni/marktext-android，MIT）
-tools/     品牌资产生成、品牌化脚本、构建脚本、签名与截图工具
-ROADMAP.md 版本迭代计划
-demo*.md   渲染能力演示文档
-```
+`tools/rebrand.mjs` keeps the product name, application IDs and repository URLs in one place; run
+`node tools/rebrand.mjs` after editing it. `tools/make_brand_assets.py` generates the icon set
+(ICO, ICNS and PNG for desktop, launcher icons for Android, favicon) from a single specification.
 
-## 品牌化（改名 / 换色 / 换图标）
+## License and attribution
 
-- 改 `tools/rebrand.mjs` 顶部的 `BRAND` 常量后运行 `node tools/rebrand.mjs`（幂等，会自动校验上游改动）
-- 改 `tools/make_brand_assets.py` 顶部的 `BRAND` 设计规格后运行，重新生成全套图标（桌面 ico/icns/png + Android mipmap + favicon）
+InkMark is built on MIT-licensed projects and keeps their copyright notices:
 
-## 许可证与致谢
+- [marktext/marktext](https://github.com/marktext/marktext) — desktop base
+- [@muyajs/core](https://github.com/marktext/muya) — editor engine
+- [Renakoni/marktext-android](https://github.com/Renakoni/marktext-android) — Android base
 
-本项目基于以下 MIT 许可的开源项目构建，保留其版权声明：
+Bundled third-party components such as KaTeX, Mermaid and Prism.js keep their own licenses, which
+are included with each release.
 
-- [marktext/marktext](https://github.com/marktext/marktext) — 桌面端基座
-- [@muyajs/core](https://github.com/marktext/muya) — Markdown 编辑器引擎
-- [Renakoni/marktext-android](https://github.com/Renakoni/marktext-android) — Android 端基座
-
-同时随包分发 KaTeX、Mermaid、Prism.js 等第三方组件，其许可证随发行包一并提供。
-
-**声明**：本项目为非官方社区项目，与 Typora、MarkText 及其维护者无隶属或背书关系；
-不含任何 Typora 的代码或素材。Typora 是其各自所有者的商标。
+InkMark is an independent community project and is not affiliated with or endorsed by the projects
+listed above.
