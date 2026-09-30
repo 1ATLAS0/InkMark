@@ -1,8 +1,8 @@
 {
-  "ref": "v0.20.0-rc3",
-  "runId": "36654359418",
+  "ref": "v0.20.1",
+  "runId": "36655083626",
   "desktop": "failure",
   "android": "success",
-  "url": "https://github.com/1ATLAS0/InkMark/actions/runs/36654359418",
-  "at": "2026-09-30T01:19:35Z"
+  "url": "https://github.com/1ATLAS0/InkMark/actions/runs/36655083626",
+  "at": "2026-09-30T01:28:55Z"
 }
