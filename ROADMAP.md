@@ -20,9 +20,11 @@ Shipped:
 
 Open:
 
-- **Large documents.** Opening a 1 MB Markdown file blocks the renderer main thread for more than
-  30 seconds, measured on a release build through the Chrome DevTools Protocol. Files of a few
-  kilobytes are unaffected. The engine has known quadratic behaviour with large inputs.
+- **Large documents.** A quadratic cost has been removed: opening a 1 MB document used to block the
+  renderer for over ten minutes and now finishes in about 35 seconds; a 240 KB document went from
+  132 seconds to 8 seconds. The remaining cost grows linearly with document size and sits in DOM
+  construction and layout rather than JavaScript (a 2 MB document takes about 63 seconds). Progressive
+  mounting is the next step; upstream has an unmerged pull request for it.
 - **Signed Android releases.** Until keystore secrets are configured, the release workflow attaches
   a debug-signed APK.
 - **Update round trip.** Installing an older build and confirming that it detects and applies a newer
@@ -53,7 +55,7 @@ Open:
 
 | Problem | Impact | Status |
 |---|---|---|
-| 1 MB document blocks the renderer for over 30 seconds | Documents of that size are unusable | Under investigation |
+| Large documents open slowly | 1 MB about 35 s, 2 MB about 63 s | Quadratic cost removed; DOM and layout work remains |
 | Android release APK is debug-signed | Launcher shows the debug label | Waiting on keystore secrets |
 | macOS and Linux builds missing | Two platforms unsupported | Planned for 0.22 |
 | Input methods and file encodings untested | Possible composition or decoding bugs | Test pass pending |
