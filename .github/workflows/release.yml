@@ -89,8 +89,12 @@ jobs:
 
       - name: 准备 Android SDK 组件
         run: |
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" || \
-            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+          set -e
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
+          echo "sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
 
       - name: 安装依赖
         working-directory: android
@@ -99,6 +103,10 @@ jobs:
       - name: 构建 Web 产物并同步
         working-directory: android
         run: pnpm run android:sync
+
+      # 仓库从 Windows 提交，gradlew 的 +x 位会丢失，Linux runner 上必须补回
+      - name: 修正 gradlew 可执行权限
+        run: chmod +x android/android/gradlew
 
       - name: 准备签名（存在 keystore secret 时启用正式签名）
         if: ${{ github.event_name == 'push' }}
@@ -192,6 +200,7 @@ jobs:
         env:
           DESKTOP: ${{ needs.desktop.result }}
           ANDROID: ${{ needs.android.result }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           git fetch origin ci-status || true
@@ -209,8 +218,18 @@ jobs:
           EOF
           printf '# CI 状态\n\n最近一次运行: %s\n\n- desktop: %s\n- android: %s\n- ref: %s\n' \
             "${GITHUB_RUN_ID}" "${DESKTOP}" "${ANDROID}" "${GITHUB_REF_NAME}" > .ci/README.md
+
+          # 失败时把失败步骤的日志抓下来（私有仓库外部看不到 Actions 日志，这里是最快的排查通道）
+          if [ "${DESKTOP}" != "success" ] || [ "${ANDROID}" != "success" ]; then
+            gh run view "${GITHUB_RUN_ID}" --log-failed > .ci/failed.log 2>&1 || true
+            echo "--- 失败日志尾部 ---"
+            tail -c 8000 .ci/failed.log || true
+          else
+            rm -f .ci/failed.log
+          fi
+
           git config user.name "inkmark-ci"
           git config user.email "ci@inkmark.local"
-          git add .ci
+          git add -A .ci
           git commit -m "ci: ${GITHUB_REF_NAME} desktop=${DESKTOP} android=${ANDROID}" || echo "无变化"
           git push -f origin ci-status
