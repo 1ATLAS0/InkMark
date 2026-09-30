@@ -73,7 +73,8 @@
 **目标**：把自己从"试用者"变成"用户"，同时把发布链路从上游摘干净。
 
 > **执行记录（2026-09-30）** — 本机与 CI 双线推进，已完成下列条目：
-> - 仓库：`github.com/1ATLAS0/InkMark`（私有，单仓库 monorepo：desktop/ + android/ + tools/）
+> - 仓库：`github.com/1ATLAS0/InkMark`（**已开源为 public**，单仓库 monorepo：desktop/ + android/ + tools/）
+> - 本机 SSH 已修复（配置有 BOM 导致 ssh 忽略全文；并区分 `id_ed25519`=1ATLAS0 与 `id_rsa`=quinn1117 两个身份）
 > - 推送链路：本机直连 github.com 被间歇阻断，改用 **SSH over 443**（`ssh://git@ssh.github.com:443/…`）稳定推送
 > - 更新链路：桌面 `publish` → 本仓库 Releases，已生成 `app-update.yml`；安卓 `appInfo` 三个地址已改指本仓库
 > - 版本号：统一 `0.20.1`（桌面/安卓同步，versionCode 5）；元数据 author/CompanyName → 1ATLAS0

@@ -168,8 +168,16 @@ jobs:
           cp artifacts/inkmark-windows-x64/*.blockmap release/ 2>/dev/null || true
           cp artifacts/inkmark-windows-x64/latest.yml release/ 2>/dev/null || true
 
-          REL=$(find artifacts/inkmark-android -path '*apk/release/*.apk' | head -1)
-          DBG=$(find artifacts/inkmark-android -path '*apk/debug/*.apk' | head -1)
+          # 按文件名查找：upload-artifact 会以“匹配路径的公共祖先”作为包内根目录，
+          # 目录层级不固定（实测只匹配到 debug APK 时，包内就是 app-debug.apk）。
+          REL=$(find artifacts/inkmark-android -name 'app-release*.apk' | head -1)
+          DBG=$(find artifacts/inkmark-android -name 'app-debug*.apk' | head -1)
+          echo "found release apk: ${REL:-<none>}"
+          echo "found debug apk:   ${DBG:-<none>}"
+          if [ -z "$DBG" ] && [ -z "$REL" ]; then
+            echo "::error::android artifact 里没有 APK"
+            exit 1
+          fi
           [ -n "$REL" ] && cp "$REL" "release/InkMark-${GITHUB_REF_NAME}-android.apk"
           [ -n "$DBG" ] && cp "$DBG" "release/InkMark-${GITHUB_REF_NAME}-android-debug.apk"
 
