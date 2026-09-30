@@ -72,22 +72,34 @@
 
 **目标**：把自己从"试用者"变成"用户"，同时把发布链路从上游摘干净。
 
+> **执行记录（2026-09-30）** — 本机与 CI 双线推进，已完成下列条目：
+> - 仓库：`github.com/1ATLAS0/InkMark`（私有，单仓库 monorepo：desktop/ + android/ + tools/）
+> - 推送链路：本机直连 github.com 被间歇阻断，改用 **SSH over 443**（`ssh://git@ssh.github.com:443/…`）稳定推送
+> - 更新链路：桌面 `publish` → 本仓库 Releases，已生成 `app-update.yml`；安卓 `appInfo` 三个地址已改指本仓库
+> - 版本号：统一 `0.20.1`（桌面/安卓同步，versionCode 5）；元数据 author/CompanyName → 1ATLAS0
+> - CI：tag 触发 → Windows 安装包 + Android APK → 自动建 Release（含 latest.yml 与 SHA256SUMS）；
+>   `report` job 把运行结果与失败日志写到 `ci-status` 分支（私有仓库下的可观测通道）
+> - 真实缺陷修复：**Windows 标题栏从不显示目录层级**（preload 暴露的 `path.sep` 取自 pathe，恒为 `/`）
+> - 测试基线：单元 **946 通过 / 0 失败**；e2e 全量在 **Windows 本机**跑通（上游 e2e 只在 ubuntu 跑，
+>   暴露并修复 5 处 Windows 假设：file:///C:/ 前缀、.cmd 需 shell、双击选词带尾随空格等）
+> - 工具：`tools/perf-baseline.mjs`（CDP 测启动/渲染 + GBK/CRLF 校验）、`tools/probe-dom.mjs`（DOM 探针）
+
 任务清单：
 
-- [ ] 建立自有仓库（建议三个：`inkmark-desktop`、`inkmark-android`、`inkmark-tools`），推送现有快照提交
-- [ ] 更新链路闭环
-  - [ ] 桌面：`electron-builder.yml` 加 `publish: { provider: github, owner, repo }`，`latest.yml` 指向自有仓库
-  - [ ] 安卓：`src/lib/appInfo.ts` 的 `releasesUrl` / `latestReleaseApiUrl` 改为自有仓库
-  - [ ] 双端各跑一次"旧版 → 检测到新版 → 更新"演练
-- [ ] 元数据与签名
-  - [ ] `packages/desktop/package.json` 的 `author` / `CompanyName` 换成你自己（上游作者只保留在 LICENSE 与 About 致谢里）
-  - [ ] 申请代码签名证书（Windows：Azure Trusted Signing 月付约 $10，**需先核实中国开发者资格**；备选 OV 证书年付）
-  - [ ] APK 换用长期 keystore（当前 `tools/keystore/inkmark.jks` 是 PoC 口令，必须换并离线备份；丢了就无法覆盖升级）
-- [ ] 稳定性基线
-  - [ ] 跑通上游测试套件（桌面 `pnpm test` / `pnpm test:e2e` 共 90 个 Playwright 用例；安卓 `pnpm test` / `pnpm test:e2e`），记录基线通过率
-  - [ ] 大文档性能基线：1MB / 5MB / 10MB Markdown 的打开耗时、滚动帧率、输入延迟（记录进性能表格）
+- [x] 建立自有仓库并推送（单仓库 monorepo：desktop/android/tools 统一管理）
+- [x] 更新链路闭环
+  - [x] 桌面：`electron-builder.yml` 增加 `publish: github(1ATLAS0/InkMark)`，生成 `app-update.yml`
+  - [x] 安卓：`src/lib/appInfo.ts` 的 `releasesUrl` / `latestReleaseApiUrl` 改为自有仓库
+  - [ ] 双端各跑一次"旧版 → 检测到新版 → 更新"演练（待首个 Release 落地后做）
+- [x] 元数据
+  - [x] `author` / `CompanyName` → 1ATLAS0；版本号统一 0.20.1
+  - [ ] 申请代码签名证书（Windows：Azure Trusted Signing，**需先核实中国开发者资格**；备选 OV 证书）
+  - [ ] APK 换用长期 keystore（当前 `tools/keystore/inkmark.jks` 是 PoC 口令 `inkmark-poc`，正式分发前必须更换并离线备份；换 keystore 会导致已装用户无法覆盖升级）
+- [~] 稳定性基线
+  - [x] 跑通上游测试套件（单元 946 通过；e2e 全量在 Windows 跑通，含 5 处用例修正 + 1 个真实 bug 修复）
+  - [ ] 大文档性能基线：1MB / 5MB / 10MB 打开与滚动耗时（脚本 `tools/perf-baseline.mjs` 已就绪，待记录数值）
+  - [ ] 文件编码与换行实测（GBK / CRLF 样例已备，随性能基线一起跑）
   - [ ] 中文输入法真机测试（桌面：微软拼音 / 搜狗；安卓：Gboard / 搜狗 / 百度 / 华为）
-  - [ ] 文件编码与换行实测（GBK 自动识别、CRLF/LF 保持、尾随换行策略）
 - [ ] 首次体验：欢迎页/空白页文案、默认快捷键说明、语言跟随系统
 
 **验收**：连续 7 天作为主力编辑器使用；无数据丢失；崩溃可恢复（草稿恢复机制实测）。

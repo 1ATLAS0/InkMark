@@ -77,7 +77,14 @@ export const launchElectron = async(
   const userDataDir = trackTempDir(getTempPath())
   // 固定 UI 语言为英文：应用默认跟随系统语言，中文机器（本机/部分贡献者）会以 zh-CN 启动，
   // 使断言英文文案的用例整片失败。需要切换语言的用例自己再发 language-changed。
-  const seededPreferences = { language: 'en', ...(options.preferences ?? {}) }
+  //
+  // 注意必须带上打包默认值：只写部分键时，应用不会自动补齐其余键，缺键的偏好会落到
+  // 非默认行为（例如 wrapCodeBlocks / codeBlockLineNumbers 变成开启），用例会莫名失败。
+  const defaultsPath = path.join(projectRoot, 'static', 'preference.json')
+  const defaults = fs.existsSync(defaultsPath)
+    ? (JSON.parse(fs.readFileSync(defaultsPath, 'utf-8')) as Record<string, unknown>)
+    : {}
+  const seededPreferences = { ...defaults, language: 'en', ...(options.preferences ?? {}) }
   fs.mkdirSync(userDataDir, { recursive: true })
   fs.writeFileSync(
     path.join(userDataDir, 'preferences.json'),
