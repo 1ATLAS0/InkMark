@@ -1,106 +1,106 @@
 {
   "fixture": "scale-100kb.md",
   "bytes": 102637,
-  "readyMs": 4530,
-  "mainThreadMs": 59,
+  "readyMs": 47247,
+  "mainThreadMs": 68,
   "progressCurve": [
     {
-      "t": 59,
+      "t": 68,
       "len": 0
     },
     {
-      "t": 591,
-      "len": 343
+      "t": 34440,
+      "len": 182338
     },
     {
-      "t": 3482,
-      "len": 75154
+      "t": 46202,
+      "len": 72645
     },
     {
-      "t": 4009,
-      "len": 75815
+      "t": 46728,
+      "len": 72645
     },
     {
-      "t": 4530,
-      "len": 75815
+      "t": 47247,
+      "len": 72645
     }
   ],
-  "docChars": 75815,
-  "docTitle": "scale-100kb.md - desktop",
-  "totalSamples": 4511,
-  "sampledMs": 902,
+  "docChars": 72645,
+  "docTitle": "scale-100kb.md",
+  "totalSamples": 33384,
+  "sampledMs": 6677,
   "topSelfTime": [
     {
+      "fn": "deepClone$1 @ assets/index-S-358_7N.js:86805",
+      "ms": 2178
+    },
+    {
+      "fn": "copyOf @ assets/index-S-358_7N.js:86810",
+      "ms": 1635
+    },
+    {
       "fn": "(idle) @ :0",
-      "ms": 476
+      "ms": 521
     },
     {
       "fn": "(program) @ :0",
-      "ms": 136
+      "ms": 377
     },
     {
-      "fn": "_selectRange @ assets/index-p_0CZpOf.js:90626",
-      "ms": 112
+      "fn": "getState @ assets/index-S-358_7N.js:139425",
+      "ms": 349
     },
     {
-      "fn": "patch @ assets/index-p_0CZpOf.js:143885",
-      "ms": 11
+      "fn": "_selectRange @ assets/index-S-358_7N.js:90626",
+      "ms": 250
     },
     {
-      "fn": "(anonymous) @ :1",
-      "ms": 7
+      "fn": "isPlainObject @ assets/index-S-358_7N.js:86799",
+      "ms": 201
     },
     {
-      "fn": "htmlToVNode @ assets/index-p_0CZpOf.js:101680",
-      "ms": 6
+      "fn": "travel @ assets/index-S-358_7N.js:143875",
+      "ms": 149
+    },
+    {
+      "fn": "scrollToCords @ assets/index-S-358_7N.js:161417",
+      "ms": 100
+    },
+    {
+      "fn": "getPosition @ assets/index-S-358_7N.js:7741",
+      "ms": 97
+    },
+    {
+      "fn": "patch @ assets/index-S-358_7N.js:143859",
+      "ms": 73
     },
     {
       "fn": "(garbage collector) @ :0",
-      "ms": 6
+      "ms": 72
     },
     {
-      "fn": "(anonymous) @ assets/index-p_0CZpOf.js:1",
-      "ms": 5
+      "fn": "RegExp: ^( {0,3}\\[)([^\\]]+?)(\\\\*)(\\]: *)(<?)([^\\s>]+)(>?)(?:( +)([\"'(]?)([^\\n\"'()]+)\\9)?( *)$ @ :0",
+      "ms": 54
     },
     {
-      "fn": "naturalCompare @ assets/index-p_0CZpOf.js:154716",
-      "ms": 4
+      "fn": "(anonymous) @ assets/index-S-358_7N.js:161428",
+      "ms": 51
     },
     {
-      "fn": "toVNode @ assets/index-p_0CZpOf.js:99232",
-      "ms": 4
+      "fn": "createDomNode @ assets/index-S-358_7N.js:86506",
+      "ms": 29
     },
     {
-      "fn": "(anonymous) @ assets/index-p_0CZpOf.js:147946",
-      "ms": 4
+      "fn": "getLabelInfo @ assets/index-S-358_7N.js:143891",
+      "ms": 29
     },
     {
-      "fn": "self2 @ assets/index-p_0CZpOf.js:99647",
-      "ms": 4
+      "fn": "remove @ assets/index-S-358_7N.js:86707",
+      "ms": 26
     },
     {
-      "fn": "createDomNode @ assets/index-p_0CZpOf.js:86506",
-      "ms": 4
-    },
-    {
-      "fn": "subscription @ :426",
-      "ms": 3
-    },
-    {
-      "fn": "walkTokens @ assets/index-p_0CZpOf.js:124300",
-      "ms": 3
-    },
-    {
-      "fn": "parseSelector2 @ assets/index-p_0CZpOf.js:99708",
-      "ms": 2
-    },
-    {
-      "fn": "(anonymous) @ :0",
-      "ms": 2
-    },
-    {
-      "fn": "renderToString3 @ assets/index-p_0CZpOf.js:99814",
-      "ms": 2
+      "fn": "walkTokens @ assets/index-S-358_7N.js:124300",
+      "ms": 26
     }
   ]
 }

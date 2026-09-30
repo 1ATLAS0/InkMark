@@ -193,7 +193,7 @@ watch(
         />
         <div v-else key="default" class="home-top-default">
           <div>
-            <h1>MarkText</h1>
+            <h1>{{ t('app.name') }}</h1>
           </div>
           <div class="home-actions">
             <button

@@ -175,6 +175,11 @@ const OPS = [
   },
   // 默认浅色固定主题切到 classic-light（再把它染成品牌色）
   {
+    // 首页标题曾硬编码为上游名称；改为走 i18n 的 app.name，改名后自动跟随
+    file: join(ANDROID, 'src/features/home/DocumentHome.vue'),
+    edits: [['<h1>MarkText</h1>', "<h1>{{ t('app.name') }}</h1>"]],
+  },
+  {
     file: join(ANDROID, 'src/features/settings/appearanceSettings.ts'),
     edits: [["light: 'graphite',", "light: 'classic-light',"]],
   },
