@@ -97,7 +97,10 @@
   - [ ] APK 换用长期 keystore（当前 `tools/keystore/inkmark.jks` 是 PoC 口令 `inkmark-poc`，正式分发前必须更换并离线备份；换 keystore 会导致已装用户无法覆盖升级）
 - [~] 稳定性基线
   - [x] 跑通上游测试套件（单元 946 通过；e2e 全量在 Windows 跑通，含 5 处用例修正 + 1 个真实 bug 修复）
-  - [ ] 大文档性能基线：1MB / 5MB / 10MB 打开与滚动耗时（脚本 `tools/perf-baseline.mjs` 已就绪，待记录数值）
+  - [~] 大文档性能基线：**已发现真问题** —— 打开 1MB Markdown 后渲染进程主线程 >30s 无响应
+        （CDP `Runtime.evaluate` 探针 30s 超时；GBK 小文件正常：窗口 713ms / 可读 2439ms / 内容校验通过）。
+        上游 issue #4887「remove the quadratic costs that freeze large documents」指向同一类二次复杂度问题。
+        → 提升为 v0.2 后续修复项：先定位是解析、渲染还是样式计算的二次开销，再决定是否需在 v0.6 前插入专项。
   - [ ] 文件编码与换行实测（GBK / CRLF 样例已备，随性能基线一起跑）
   - [ ] 中文输入法真机测试（桌面：微软拼音 / 搜狗；安卓：Gboard / 搜狗 / 百度 / 华为）
 - [ ] 首次体验：欢迎页/空白页文案、默认快捷键说明、语言跟随系统
