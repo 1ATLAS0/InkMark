@@ -33,6 +33,12 @@ Open:
   (vivo, Android 16): text commits correctly, no input-connection errors in the logs. Windows IMEs
   and other Android keyboards remain untested.
 - **Encoding.** GB18030/GBK detection and CRLF handling need a test pass with real files.
+- **Android: large documents.** A 1 MB document mounts only its first blocks; the rest stays as raw
+  markdown text. The chunked mount appears to stall: the process is idle, the UI stays responsive and
+  nothing is written to the log. Documents around 250 KB render completely. Reproduced on a vivo
+  device running Android 16.
+- **Android: inline math.** `$…$` is shown literally on the phone while the desktop build typesets it
+  with KaTeX. Whether that is intended mobile behaviour still needs confirming.
 
 ## 0.21 — editing and export
 
@@ -59,6 +65,8 @@ Open:
 | Large documents open slowly | 1 MB about 35 s, 2 MB about 63 s | Quadratic cost removed; DOM and layout work remains |
 | Android release APK is debug-signed | Launcher shows the debug label | Waiting on keystore secrets |
 | macOS and Linux builds missing | Two platforms unsupported | Planned for 0.22 |
+| Android: 1 MB document renders only the first blocks | Large files unreadable on the phone | Chunked mount stalls; under investigation |
+| Android: inline math shown literally | Formulas not typeset on the phone | Desktop renders it; to confirm |
 | Input methods and file encodings untested | Possible composition or decoding bugs | Test pass pending |
 
 ## Release process
