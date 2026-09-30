@@ -1,0 +1,106 @@
+{
+  "fixture": "scale-2000kb.md",
+  "bytes": 2048113,
+  "readyMs": 62813,
+  "mainThreadMs": 59,
+  "progressCurve": [
+    {
+      "t": 59,
+      "len": 0
+    },
+    {
+      "t": 626,
+      "len": 924
+    },
+    {
+      "t": 59599,
+      "len": 1509454
+    },
+    {
+      "t": 61468,
+      "len": 1509575
+    },
+    {
+      "t": 62813,
+      "len": 1509575
+    }
+  ],
+  "docChars": 1509575,
+  "docTitle": "scale-2000kb.md - desktop",
+  "totalSamples": 42467,
+  "sampledMs": 8493,
+  "topSelfTime": [
+    {
+      "fn": "(program) @ :0",
+      "ms": 2400
+    },
+    {
+      "fn": "_selectRange @ assets/index-p_0CZpOf.js:90626",
+      "ms": 1963
+    },
+    {
+      "fn": "walkTokens @ assets/index-p_0CZpOf.js:124300",
+      "ms": 1064
+    },
+    {
+      "fn": "start @ assets/index-p_0CZpOf.js:124888",
+      "ms": 494
+    },
+    {
+      "fn": "(idle) @ :0",
+      "ms": 310
+    },
+    {
+      "fn": "(garbage collector) @ :0",
+      "ms": 199
+    },
+    {
+      "fn": "patch @ assets/index-p_0CZpOf.js:143885",
+      "ms": 189
+    },
+    {
+      "fn": "_convertMarkdownToState @ assets/index-p_0CZpOf.js:138490",
+      "ms": 173
+    },
+    {
+      "fn": "deepClone$1 @ assets/index-p_0CZpOf.js:86805",
+      "ms": 167
+    },
+    {
+      "fn": "htmlToVNode @ assets/index-p_0CZpOf.js:101680",
+      "ms": 126
+    },
+    {
+      "fn": "toVNode @ assets/index-p_0CZpOf.js:99232",
+      "ms": 109
+    },
+    {
+      "fn": "(anonymous) @ :1",
+      "ms": 107
+    },
+    {
+      "fn": "(anonymous) @ assets/index-p_0CZpOf.js:147946",
+      "ms": 76
+    },
+    {
+      "fn": "createDomNode @ assets/index-p_0CZpOf.js:86506",
+      "ms": 57
+    },
+    {
+      "fn": "self2 @ assets/index-p_0CZpOf.js:99647",
+      "ms": 53
+    },
+    {
+      "fn": "_checkHasBind @ assets/index-p_0CZpOf.js:144798",
+      "ms": 50
+    },
+    {
+      "fn": "renderToString3 @ assets/index-p_0CZpOf.js:99814",
+      "ms": 45
+    },
+    {
+      "fn": "classModule2 @ assets/index-p_0CZpOf.js:101108",
+      "ms": 36
+    }
+  ]
+}

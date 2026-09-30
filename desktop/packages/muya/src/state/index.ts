@@ -52,6 +52,11 @@ class JSONState {
 
     private _state: TState[] = [];
 
+    // Incremented on every document mutation. Consumers use it to cache results
+    // of expensive whole-document scans instead of recomputing them per block
+    // (reference-definition collection was the worst offender).
+    private _revision = 0;
+
     constructor(private _muya: Muya, stateOrMarkdown: TState[] | string) {
         this.setContent(stateOrMarkdown);
     }
@@ -63,6 +68,7 @@ class JSONState {
         if (op === null)
             return;
         this._state = asState(json1.type.apply(asDoc(this._state), op));
+        this._revision += 1;
     }
 
     setContent(content: TState[] | string) {
@@ -84,10 +90,12 @@ class JSONState {
 
     private _setState(state: TState[]) {
         this._state = state;
+        this._revision += 1;
     }
 
     private _setMarkdown(markdown: string) {
         this._state = this.markdownToState(markdown);
+        this._revision += 1;
     }
 
     // Parse markdown into a block-state array with the editor's current
@@ -225,6 +233,23 @@ class JSONState {
 
     getState(): TState[] {
         return deepClone(this._state);
+    }
+
+    /**
+     * Revision counter that changes only when the document actually changes.
+     * Lets consumers cache derived results instead of recomputing them per block.
+     */
+    getRevision(): number {
+        return this._revision;
+    }
+
+    /**
+     * Returns the live state array WITHOUT cloning. Read-only: callers must not
+     * mutate it. Intended for scans that only read, so a whole-document clone is
+     * not paid for work like collecting reference definitions.
+     */
+    peekState(): TState[] {
+        return this._state;
     }
 
     getMarkdown() {

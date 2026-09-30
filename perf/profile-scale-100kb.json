@@ -1,0 +1,106 @@
+{
+  "fixture": "scale-100kb.md",
+  "bytes": 102637,
+  "readyMs": 4530,
+  "mainThreadMs": 59,
+  "progressCurve": [
+    {
+      "t": 59,
+      "len": 0
+    },
+    {
+      "t": 591,
+      "len": 343
+    },
+    {
+      "t": 3482,
+      "len": 75154
+    },
+    {
+      "t": 4009,
+      "len": 75815
+    },
+    {
+      "t": 4530,
+      "len": 75815
+    }
+  ],
+  "docChars": 75815,
+  "docTitle": "scale-100kb.md - desktop",
+  "totalSamples": 4511,
+  "sampledMs": 902,
+  "topSelfTime": [
+    {
+      "fn": "(idle) @ :0",
+      "ms": 476
+    },
+    {
+      "fn": "(program) @ :0",
+      "ms": 136
+    },
+    {
+      "fn": "_selectRange @ assets/index-p_0CZpOf.js:90626",
+      "ms": 112
+    },
+    {
+      "fn": "patch @ assets/index-p_0CZpOf.js:143885",
+      "ms": 11
+    },
+    {
+      "fn": "(anonymous) @ :1",
+      "ms": 7
+    },
+    {
+      "fn": "htmlToVNode @ assets/index-p_0CZpOf.js:101680",
+      "ms": 6
+    },
+    {
+      "fn": "(garbage collector) @ :0",
+      "ms": 6
+    },
+    {
+      "fn": "(anonymous) @ assets/index-p_0CZpOf.js:1",
+      "ms": 5
+    },
+    {
+      "fn": "naturalCompare @ assets/index-p_0CZpOf.js:154716",
+      "ms": 4
+    },
+    {
+      "fn": "toVNode @ assets/index-p_0CZpOf.js:99232",
+      "ms": 4
+    },
+    {
+      "fn": "(anonymous) @ assets/index-p_0CZpOf.js:147946",
+      "ms": 4
+    },
+    {
+      "fn": "self2 @ assets/index-p_0CZpOf.js:99647",
+      "ms": 4
+    },
+    {
+      "fn": "createDomNode @ assets/index-p_0CZpOf.js:86506",
+      "ms": 4
+    },
+    {
+      "fn": "subscription @ :426",
+      "ms": 3
+    },
+    {
+      "fn": "walkTokens @ assets/index-p_0CZpOf.js:124300",
+      "ms": 3
+    },
+    {
+      "fn": "parseSelector2 @ assets/index-p_0CZpOf.js:99708",
+      "ms": 2
+    },
+    {
+      "fn": "(anonymous) @ :0",
+      "ms": 2
+    },
+    {
+      "fn": "renderToString3 @ assets/index-p_0CZpOf.js:99814",
+      "ms": 2
+    }
+  ]
+}

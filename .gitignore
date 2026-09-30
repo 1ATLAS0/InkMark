@@ -15,3 +15,4 @@ upstream-marktext-android/
 
 # 性能/编码测试物料（由 tools/make-perf-fixtures.py 生成）
 perf/*.md
+perf/*.cpuprofile

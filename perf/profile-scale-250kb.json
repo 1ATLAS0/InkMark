@@ -1,0 +1,106 @@
+{
+  "fixture": "scale-250kb.md",
+  "bytes": 256108,
+  "readyMs": 8081,
+  "mainThreadMs": 85,
+  "progressCurve": [
+    {
+      "t": 85,
+      "len": 0
+    },
+    {
+      "t": 618,
+      "len": 343
+    },
+    {
+      "t": 7003,
+      "len": 184892
+    },
+    {
+      "t": 7543,
+      "len": 185553
+    },
+    {
+      "t": 8081,
+      "len": 185553
+    }
+  ],
+  "docChars": 185553,
+  "docTitle": "scale-250kb.md - desktop",
+  "totalSamples": 7094,
+  "sampledMs": 1419,
+  "topSelfTime": [
+    {
+      "fn": "(idle) @ :0",
+      "ms": 491
+    },
+    {
+      "fn": "(program) @ :0",
+      "ms": 296
+    },
+    {
+      "fn": "_selectRange @ assets/index-p_0CZpOf.js:90626",
+      "ms": 252
+    },
+    {
+      "fn": "deepClone$1 @ assets/index-p_0CZpOf.js:86805",
+      "ms": 41
+    },
+    {
+      "fn": "patch @ assets/index-p_0CZpOf.js:143885",
+      "ms": 25
+    },
+    {
+      "fn": "walkTokens @ assets/index-p_0CZpOf.js:124300",
+      "ms": 19
+    },
+    {
+      "fn": "htmlToVNode @ assets/index-p_0CZpOf.js:101680",
+      "ms": 18
+    },
+    {
+      "fn": "toVNode @ assets/index-p_0CZpOf.js:99232",
+      "ms": 18
+    },
+    {
+      "fn": "(anonymous) @ :1",
+      "ms": 15
+    },
+    {
+      "fn": "(garbage collector) @ :0",
+      "ms": 12
+    },
+    {
+      "fn": "start @ assets/index-p_0CZpOf.js:124888",
+      "ms": 9
+    },
+    {
+      "fn": "(anonymous) @ assets/index-p_0CZpOf.js:147946",
+      "ms": 9
+    },
+    {
+      "fn": "renderToString3 @ assets/index-p_0CZpOf.js:99814",
+      "ms": 8
+    },
+    {
+      "fn": "parse2 @ assets/index-p_0CZpOf.js:99797",
+      "ms": 7
+    },
+    {
+      "fn": "self2 @ assets/index-p_0CZpOf.js:99647",
+      "ms": 7
+    },
+    {
+      "fn": "createDomNode @ assets/index-p_0CZpOf.js:86506",
+      "ms": 7
+    },
+    {
+      "fn": "naturalCompare @ assets/index-p_0CZpOf.js:154716",
+      "ms": 6
+    },
+    {
+      "fn": "parseSelector2 @ assets/index-p_0CZpOf.js:99708",
+      "ms": 5
+    }
+  ]
+}

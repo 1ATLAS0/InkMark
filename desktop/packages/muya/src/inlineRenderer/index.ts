@@ -15,6 +15,11 @@ class InlineRenderer {
     public labels: Labels = new Map();
     public renderer: Renderer;
 
+    // Revision of the document state the current `labels` map was built from.
+    // Definitions can only change when the document changes, so the whole-state
+    // scan runs once per revision instead of once per rendered block.
+    private _labelsRevision = -1;
+
     constructor(public muya: Muya) {
         this.renderer = new Renderer(muya, this);
     }
@@ -60,7 +65,12 @@ class InlineRenderer {
     }
 
     patch(block: Format, cursor?: IRenderCursor, highlights: IHighlight[] = []) {
-        this._collectReferenceDefinitions();
+        const jsonState = this.muya.editor.jsonState;
+        const revision = jsonState.getRevision();
+        if (this._labelsRevision !== revision) {
+            this._collectReferenceDefinitions();
+            this._labelsRevision = revision;
+        }
         const { domNode } = block;
         if (block.isParent())
             debug.error('Patch can only handle content block');
@@ -75,7 +85,9 @@ class InlineRenderer {
     }
 
     private _collectReferenceDefinitions() {
-        const state = this.muya.editor.jsonState.getState();
+        // Read the live state: this walk only reads, and cloning the whole
+        // document here would cost O(document) per revision on large files.
+        const state = this.muya.editor.jsonState.peekState();
         const labels = new Map();
 
         const travel = (sts: TState[]) => {
