@@ -59,9 +59,27 @@ test.describe('i18n shell — language switch re-translates the Vue shell', () =
   })
 
   test('command palette placeholder re-translates en -> zh-CN', async() => {
-    // 1) Read the English shell label.
+    // 0) 先显式切到英文：应用默认跟随系统语言，中文环境（本机/部分 CI）会直接以
+    //    zh-CN 启动，原用例假定英文启动会因此失败。
+    await sendIpcToRenderer(app, 'language-changed', 'en')
+    await sendIpcToRenderer(app, 'mt::user-preference', { language: 'en' })
+
+    // 1) Read the English shell label. 语言包是异步加载的，这里等待其生效。
+    await expect
+      .poll(
+        async() => {
+          await openPalette(app, page)
+          const value = await readPlaceholder(page)
+          await closePalette(page)
+          return value
+        },
+        { timeout: 8000, intervals: [300, 500, 800] }
+      )
+      .toBe('Type a command to execute')
+
     await openPalette(app, page)
     const enPlaceholder = await readPlaceholder(page)
+    await closePalette(page)
     expect(enPlaceholder).toBeTruthy()
     // The English string from static/locales/en.json.
     expect(enPlaceholder).toBe('Type a command to execute')

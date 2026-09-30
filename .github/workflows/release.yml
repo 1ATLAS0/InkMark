@@ -164,7 +164,53 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 非正式版本（含 -rc/-alpha/-beta）自动标记为 pre-release，避免自更新误推
+          PRE=""
+          case "$GITHUB_REF_NAME" in
+            *-rc*|*-alpha*|*-beta*) PRE="--prerelease" ;;
+          esac
           gh release create "$GITHUB_REF_NAME" \
             --title "InkMark $GITHUB_REF_NAME" \
-            --generate-notes \
+            --generate-notes $PRE \
             release/*
+
+  # ------------------------------------------------------------------ 状态回写
+  # 仓库为私有，外部无法读取 Actions 运行状态；把结果写到一个分支便于脚本化查看：
+  #   git ls-remote origin refs/heads/ci-status   /   git fetch origin ci-status
+  report:
+    name: report status
+    needs: [desktop, android]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: 写 ci-status 分支
+        env:
+          DESKTOP: ${{ needs.desktop.result }}
+          ANDROID: ${{ needs.android.result }}
+        run: |
+          set -e
+          git fetch origin ci-status || true
+          git checkout -B ci-status origin/ci-status 2>/dev/null || git checkout -B ci-status
+          mkdir -p .ci
+          cat > .ci/status.json <<EOF
+          {
+            "ref": "${GITHUB_REF_NAME}",
+            "runId": "${GITHUB_RUN_ID}",
+            "desktop": "${DESKTOP}",
+            "android": "${ANDROID}",
+            "url": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
+            "at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          printf '# CI 状态\n\n最近一次运行: %s\n\n- desktop: %s\n- android: %s\n- ref: %s\n' \
+            "${GITHUB_RUN_ID}" "${DESKTOP}" "${ANDROID}" "${GITHUB_REF_NAME}" > .ci/README.md
+          git config user.name "inkmark-ci"
+          git config user.email "ci@inkmark.local"
+          git add .ci
+          git commit -m "ci: ${GITHUB_REF_NAME} desktop=${DESKTOP} android=${ANDROID}" || echo "无变化"
+          git push -f origin ci-status
