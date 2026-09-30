@@ -102,7 +102,10 @@ test.describe('Relative-path image resolves to a DIRNAME-anchored file:// URL', 
     // relative path and contains the document directory.
     const withoutQuery = value.split('?')[0]
     expect(withoutQuery.endsWith('assets/cat.png')).toBe(true)
-    const expectedSrc = `file://${docDir.replace(/\\/g, '/')}/assets/cat.png`
+    // 合法的 file URL：POSIX 路径以 / 开头（file:///tmp/…），Windows 盘符路径是三斜杠
+    // 形式（file:///C:/…）。上游只在 Linux 跑 e2e，这里补上 Windows 分支。
+    const posixDocDir = docDir.replace(/\\/g, '/')
+    const expectedSrc = `file://${posixDocDir.startsWith('/') ? '' : '/'}${posixDocDir}/assets/cat.png`
     expect(withoutQuery).toBe(expectedSrc)
   })
 
@@ -115,7 +118,10 @@ test.describe('Relative-path image resolves to a DIRNAME-anchored file:// URL', 
     const withoutQuery = (src as string).split('?')[0]
     // Convert the file:// URL back to a filesystem path and confirm the engine
     // resolved it to the on-disk sibling we wrote in setup.
-    const onDiskPath = withoutQuery.replace(/^file:\/\//, '')
+    const onDiskPath = withoutQuery
+      .replace(/^file:\/\//, '')
+      // Windows 的 file URL 形如 file:///C:/…，去掉前缀后要去掉盘符前的那个斜杠
+      .replace(/^\/(?=[A-Za-z]:)/, '')
     expect(fs.existsSync(onDiskPath)).toBe(true)
     expect(onDiskPath).toBe(path.join(docDir, 'assets', 'cat.png').replace(/\\/g, '/'))
   })
@@ -155,7 +161,9 @@ test.describe('Relative-path image in a directory named with URL delimiters (#52
       .getAttribute('src')
     expect(src).not.toBeNull()
     const url = new URL(src as string)
-    expect(decodeURIComponent(url.pathname)).toBe(
+    // Node 对 file:///C:/… 解析出的 pathname 是 "/C:/…"，Windows 下需去掉盘符前的斜杠
+    const received = decodeURIComponent(url.pathname).replace(/^\/(?=[A-Za-z]:)/, '')
+    expect(received).toBe(
       path.join(docDir, 'assets', 'cat.png').replace(/\\/g, '/')
     )
   })

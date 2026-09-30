@@ -273,7 +273,9 @@ const pathAPI = {
   normalize: (...args: Parameters<typeof pathe.normalize>) => pathe.normalize(...args),
   parse: (...args: Parameters<typeof pathe.parse>) => pathe.parse(...args),
   format: (...args: Parameters<typeof pathe.format>) => pathe.format(...args),
-  sep: pathe.sep,
+  // pathe 是 POSIX 风格实现，pathe.sep 恒为 "/"；Windows 上要用真正的分隔符，
+  // 否则渲染层按 "/" 切分 Windows 路径会得到单段（标题栏因此不显示目录层级）。
+  sep: process.platform === 'win32' ? '\\' : '/',
   delimiter: pathe.delimiter
   // Note: `pathe.posix` / `pathe.win32` are intentionally not exposed.
   // Each contains a self-reference (`pathe.posix.posix === pathe.posix`),

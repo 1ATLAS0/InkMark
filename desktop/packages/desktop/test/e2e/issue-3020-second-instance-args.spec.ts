@@ -74,7 +74,13 @@ test('a second instance started with --user-data-dir opens its file in the runni
   const secondInstance = spawn(
     getElectronPath(),
     [projectRoot, 'second.md', '--user-data-dir', userDataDir, ...sandboxArgs],
-    { cwd: docDir, env: { ...process.env, PERF_TESTING: 'true' } }
+    {
+      cwd: docDir,
+      env: { ...process.env, PERF_TESTING: 'true' },
+      // Windows 上 getElectronPath() 返回 electron.cmd（批处理垫片），
+      // 不经 shell 直接 spawn 会 EINVAL；上游只在 Linux 跑 e2e 未覆盖到。
+      shell: process.platform === 'win32'
+    }
   )
   try {
     const { code, signal, output } = await waitForExit(secondInstance, 15000)
