@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: read # report job 需要读失败步骤日志（gh run view --log-failed）
 
 jobs:
   # ------------------------------------------------------------------ 桌面端

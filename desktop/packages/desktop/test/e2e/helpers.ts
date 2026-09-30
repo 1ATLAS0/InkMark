@@ -75,14 +75,15 @@ export const launchElectron = async(
   // Pass project root as entry so Electron reads package.json and getAppPath() returns project root.
   // Passing out/main/index.js directly bypasses package.json and breaks __static path resolution.
   const userDataDir = trackTempDir(getTempPath())
-  if (options.preferences) {
-    fs.mkdirSync(userDataDir, { recursive: true })
-    fs.writeFileSync(
-      path.join(userDataDir, 'preferences.json'),
-      JSON.stringify(options.preferences, null, 2),
-      'utf-8'
-    )
-  }
+  // 固定 UI 语言为英文：应用默认跟随系统语言，中文机器（本机/部分贡献者）会以 zh-CN 启动，
+  // 使断言英文文案的用例整片失败。需要切换语言的用例自己再发 language-changed。
+  const seededPreferences = { language: 'en', ...(options.preferences ?? {}) }
+  fs.mkdirSync(userDataDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(userDataDir, 'preferences.json'),
+    JSON.stringify(seededPreferences, null, 2),
+    'utf-8'
+  )
   const args = [projectRoot, '--user-data-dir', userDataDir].concat(userArgs)
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v
