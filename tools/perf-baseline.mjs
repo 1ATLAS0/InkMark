@@ -26,27 +26,31 @@ if (!existsSync(APP)) {
   process.exit(1)
 }
 
-const FIXTURES = [
+const ONLY = process.argv.includes('--quick')
+const FIXTURES = (ONLY
+  ? [{ file: join(ROOT, 'perf', 'gbk-sample.md'), label: 'GBK 编码文件（快速自检）', expect: '这是一段 GBK 编码的中文文本' }]
+  : [
   { file: join(ROOT, 'perf', 'perf-1mb.md'), label: '1 MB 文档' },
   { file: join(ROOT, 'perf', 'perf-5mb.md'), label: '5 MB 文档' },
   { file: join(ROOT, 'perf', 'perf-10mb.md'), label: '10 MB 文档' },
   { file: join(ROOT, 'perf', 'gbk-sample.md'), label: 'GBK 编码文件', expect: '这是一段 GBK 编码的中文文本' },
   { file: join(ROOT, 'perf', 'crlf-sample.md'), label: 'CRLF 换行文件', expect: '第二行' },
-]
+])
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-async function cdpTarget(port, timeoutMs = 60000) {
+async function cdpTarget(port, timeoutMs = 90000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
-      const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+      const res = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(3000) })
+      const list = await res.json()
       const page = list.find((t) => t.type === 'page' && t.webSocketDebuggerUrl)
       if (page) return page
     } catch {
       /* 还没起来 */
     }
-    await sleep(120)
+    await sleep(150)
   }
   throw new Error('等待 CDP 页面超时')
 }
@@ -55,6 +59,10 @@ function connect(url) {
   const ws = new WebSocket(url)
   let seq = 0
   const pending = new Map()
+  const settleAll = (msg) => {
+    for (const [, resolve] of pending) resolve(msg)
+    pending.clear()
+  }
   ws.addEventListener('message', (e) => {
     const msg = JSON.parse(e.data)
     const resolve = pending.get(msg.id)
@@ -63,6 +71,9 @@ function connect(url) {
       resolve(msg)
     }
   })
+  // 连接意外关闭时唤醒所有等待中的调用，否则 promise 永不 settle（表现为脚本静默卡死）
+  ws.addEventListener('close', () => settleAll({ result: { result: { value: undefined } } }))
+  ws.addEventListener('error', () => settleAll({ result: { result: { value: undefined } } }))
   const ready = new Promise((res, rej) => {
     ws.onopen = res
     ws.onerror = rej
@@ -89,8 +100,8 @@ async function killApp() {
 async function measureOne(port, fixture) {
   await killApp()
   const t0 = Date.now()
-  const child = spawn(APP, [`--remote-debugging-port=${port}`, '--user-data-dir=' + join(ROOT, '.toolchain', 'perf-profile'), fixture.file], {
-    detached: true,
+  const child = spawn(APP, [`--remote-debugging-port=${port}`, fixture.file], {
+    windowsHide: true,
     stdio: 'ignore',
   })
   child.unref()
@@ -100,6 +111,15 @@ async function measureOne(port, fixture) {
 
   const { ready, call, close } = connect(page.webSocketDebuggerUrl)
   await ready
+
+  // 大文档渲染会把渲染进程主线程占满，此时 CDP 的 Runtime.evaluate 不会应答。
+  // 因此用一个"空调用"来测主线程恢复时间：它就是"文档可交互"的时刻。
+  const probe = await Promise.race([
+    call('Runtime.evaluate', { expression: '1', returnByValue: true }),
+    sleep(120000).then(() => null),
+  ])
+  const mainThreadMs = Date.now() - t0
+  if (!probe) throw new Error(`渲染进程 ${120}s 内未恢复响应（文档过大或卡死）`)
 
   // 轮询正文长度，连续 3 次不增长视为渲染完成
   let last = -1
@@ -133,7 +153,7 @@ async function measureOne(port, fixture) {
   }
 
   close()
-  return { label: fixture.label, windowMs: t1, renderMs: t2, chars, sanity }
+  return { label: fixture.label, windowMs: t1, renderMs: t2, mainThreadMs, chars, sanity }
 }
 
 const results = []
@@ -142,7 +162,7 @@ for (const fixture of FIXTURES) {
   process.stdout.write(`测量中: ${fixture.label} ... `)
   const r = await measureOne(port, fixture)
   results.push(r)
-  console.log(`窗口 ${r.windowMs}ms / 可读 ${r.renderMs}ms / 正文字符 ${r.chars}${r.sanity === null ? '' : r.sanity ? ' / 内容正确' : ' / ✗ 内容不符'}`)
+  console.log(`窗口 ${r.windowMs}ms / 主线程恢复 ${r.mainThreadMs}ms / 渲染稳定 ${r.renderMs}ms / 正文字符 ${r.chars}${r.sanity === null ? '' : r.sanity ? ' / 内容正确' : ' / ✗ 内容不符'}`)
 }
 await killApp()
 

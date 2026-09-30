@@ -1,0 +1,13 @@
+{
+  "measuredAt": "2026-09-30T02:19:03.434Z",
+  "app": "inkmark.exe",
+  "results": [
+    {
+      "label": "GBK 编码文件（快速自检）",
+      "windowMs": 713,
+      "renderMs": 2439,
+      "chars": 401,
+      "sanity": true
+    }
+  ]
+}
