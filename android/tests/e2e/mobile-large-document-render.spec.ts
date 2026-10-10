@@ -27,14 +27,15 @@ function largeMarkdown(sections: number): string {
 }
 
 async function rawStats(page: import('@playwright/test').Page) {
+  // 几何判据：标记是否真的占据可见宽度。muya 用 font-size:0 隐藏标记，
+  // innerText 仍会包含这些文本，所以按文本判断会误报。
   return page.evaluate(() => {
     const blocks = [...document.querySelectorAll('.mu-container > *')]
-    const isRaw = (el: Element) => {
-      const tag = el.tagName.toLowerCase()
-      if (tag === 'pre') return false
-      const text = (el as HTMLElement).innerText || ''
-      return /\*\*/.test(text) || /^#{1,6} /m.test(text) || /\]\(https?:/.test(text)
+    const hasVisibleMarker = (el: Element) => {
+      if (el.classList.contains('mu-active')) return false // 光标所在块按设计显示标记
+      return [...el.querySelectorAll('.mu-hide')].some((m) => m.getBoundingClientRect().width > 1)
     }
+    const isRaw = hasVisibleMarker
     const byClass: Record<string, { total: number; raw: number }> = {}
     const samples: string[] = []
     for (const el of blocks) {
@@ -56,7 +57,16 @@ async function rawStats(page: import('@playwright/test').Page) {
         }
       }
     } catch { /* 跨域样式表 */ }
+    const parents: string[] = []
+    let cur: Element | null = hideEl
+    while (cur && parents.length < 6) {
+      parents.push(cur.tagName.toLowerCase() + '.' + (cur.className || '').toString().split(' ').slice(0, 2).join('.'))
+      cur = cur.parentElement
+    }
     const hideInfo = {
+      hideFontSize: hideEl ? getComputedStyle(hideEl).fontSize : null,
+      hideInlineStyle: hideEl ? hideEl.getAttribute('style') : null,
+      hideParents: parents,
       hideCount: document.querySelectorAll('.mu-hide').length,
       removeCount: document.querySelectorAll('.mu-remove').length,
       display: hideEl ? getComputedStyle(hideEl).display : null,
@@ -72,7 +82,7 @@ for (const sections of [40, 400, 2000]) {
   // fixme：本用例记录真机 1 MB 文档后段保持原始 Markdown 的问题，但当前尚不能稳定复现。
   // dev server 环境下 .mu-hide（用于隐藏 # 与 ** 等标记）未生效，属该环境的样式差异；
   // 真机正式版仅在大文档后段出现。定位过程见仓库提交说明。
-  test.fixme(`large document renders inline content (${sections} sections)`, async ({ page }) => {
+  test(`large document renders inline content (${sections} sections)`, async ({ page }) => {
     test.setTimeout(240_000)
     const markdown = largeMarkdown(sections)
     await installAndroidAppMock(page, undefined, {
@@ -88,27 +98,31 @@ for (const sections of [40, 400, 2000]) {
     await page.goto('/')
     await expectEditorReady(page)
 
-    // 轮询到"不再有原始标记"或超时，并记录收敛耗时（渲染可能是渐进的）
+    // 先等挂载稳定（连续两次块数不变），再判断渲染 —— 只等"raw==0"会在大文档上过早返回
     const started = Date.now()
-    let last = { blocks: 0, raw: -1 }
-    let settledMs: number | null = null
-    for (let i = 0; i < 40; i += 1) {
-      last = await rawStats(page).then((s) => ({ blocks: s.blocks, raw: s.raw }))
-      console.log(`  [${sections}] t=${Date.now() - started}ms blocks=${last.blocks} raw=${last.raw}`)
-      if (last.raw === 0) {
-        settledMs = Date.now() - started
+    let prevBlocks = -1
+    let mountSettledMs: number | null = null
+    for (let i = 0; i < 60; i += 1) {
+      const now = (await rawStats(page)).blocks
+      console.log(`  [${sections}] t=${Date.now() - started}ms blocks=${now}`)
+      if (now === prevBlocks) {
+        mountSettledMs = Date.now() - started
         break
       }
+      prevBlocks = now
       await page.waitForTimeout(1000)
     }
+    const settledMs = mountSettledMs
+    const expectedBlocks = sections * 4 + 1
 
     const stats = await rawStats(page)
     console.log(
       `[${sections} 节 / ${(markdown.length / 1024).toFixed(0)} KB] ` +
         `settled=${settledMs === null ? 'timeout' : settledMs + 'ms'} ` +
-        JSON.stringify({ blocks: stats.blocks, raw: stats.raw, byClass: stats.byClass, samples: stats.samples }),
+        JSON.stringify({ blocks: stats.blocks, raw: stats.raw, byClass: stats.byClass }),
     )
-    expect(stats.blocks, '文档应有块被挂载').toBeGreaterThan(0)
+    console.log('HIDEINFO ' + JSON.stringify(stats.hideInfo))
+    expect(stats.blocks, '挂载应完成（分片链不应中断）').toBeGreaterThanOrEqual(Math.floor(expectedBlocks * 0.95))
     expect(stats.raw, '仍有块显示原始 Markdown').toBe(0)
   })
 }

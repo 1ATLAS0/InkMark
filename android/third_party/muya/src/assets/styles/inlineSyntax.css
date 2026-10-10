@@ -27,6 +27,13 @@
 
     font-size: 0;
     white-space: nowrap;
+
+    /* font-size: 0 alone is not reliable everywhere: some Android WebViews clamp
+       text to a minimum size (or autosize it), which makes the syntax markers
+       visible again — the document then reads like raw Markdown. Keep the
+       element in flow (so editing offsets stay valid) but make it invisible
+       regardless of the effective font size. */
+    visibility: hidden;
 }
 
 /* link and auto-link and reference link */
