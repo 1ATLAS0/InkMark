@@ -1,3 +1,4 @@
+import { createLogger } from './logger'
 import {
   parseLocalDrafts,
   serializeLocalDrafts,
@@ -13,6 +14,8 @@ import {
   serializeRecentDocuments,
   type RecentDocumentRecord,
 } from './recentDocuments'
+
+const draftsLogger = createLogger('drafts')
 
 export const LEGACY_DRAFT_STORAGE_KEY = 'marktext-for-android:draft'
 export const LOCAL_DRAFTS_STORAGE_KEY = 'marktext-for-android:drafts'
@@ -30,17 +33,40 @@ export function readStoredLocalDrafts(storage: DocumentStorage = localStorage) {
   return parseLocalDrafts(storage.getItem(LOCAL_DRAFTS_STORAGE_KEY))
 }
 
+/**
+ * Writes the draft store and reports whether the payload was persisted.
+ *
+ * localStorage allows roughly 5 MB and most engines count string characters
+ * twice, so a few 1 MB documents exhaust the origin: the draft write threw
+ * QuotaExceededError and the document open that triggered it aborted. Draft
+ * records are never evicted here — each one is the only durable copy of its
+ * content — so a write that does not fit reports failure and leaves the
+ * stored records untouched.
+ */
 export function writeStoredLocalDrafts(
   records: LocalDraftRecord[],
   storage: DocumentStorage = localStorage,
-) {
-  if (records.length > 0) {
-    storage.setItem(LOCAL_DRAFTS_STORAGE_KEY, serializeLocalDrafts(records))
-  } else {
+): boolean {
+  if (records.length === 0) {
     storage.removeItem(LOCAL_DRAFTS_STORAGE_KEY)
+    storage.removeItem(LEGACY_DRAFT_STORAGE_KEY)
+    return true
+  }
+
+  const payload = serializeLocalDrafts(records)
+  try {
+    storage.setItem(LOCAL_DRAFTS_STORAGE_KEY, payload)
+  } catch (error) {
+    draftsLogger.warn('local drafts did not fit the storage quota; nothing was written', {
+      drafts: records.length,
+      characters: payload.length,
+      error: String(error),
+    })
+    return false
   }
 
   storage.removeItem(LEGACY_DRAFT_STORAGE_KEY)
+  return true
 }
 
 export function readLegacyDraft(storage: DocumentStorage = localStorage) {

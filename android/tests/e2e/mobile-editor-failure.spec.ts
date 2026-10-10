@@ -80,7 +80,7 @@ test('surfaces a calm recovery panel instead of a silent dead editor when init f
 
   // Back to files: the user is never trapped on the failure screen.
   await page.getByTestId('editor-failure-back').click()
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
 })
 
 test('carries the current document across a recovery reload when Retry cannot recover in-page', async ({

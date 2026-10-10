@@ -85,13 +85,13 @@ async function installAndroidBackButtonMock(page: Page) {
 }
 
 test('switches between document home and the settings about screen', async ({ page }) => {
-  await page.route('https://api.github.com/repos/Renakoni/marktext-android/releases/latest', route =>
+  await page.route(APP_INFO.latestReleaseApiUrl, route =>
     route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
         tag_name: 'v1.0.0',
-        html_url: 'https://github.com/Renakoni/marktext-android/releases/tag/v1.0.0',
+        html_url: `${APP_INFO.releasesUrl}/tag/v1.0.0`,
       }),
     }),
   )
@@ -282,7 +282,7 @@ test('switches between document home and the settings about screen', async ({ pa
   await expect(page.getByTestId('settings-about-version')).toContainText(APP_INFO.version)
   await expect(page.getByTestId('settings-about-github')).toHaveAttribute(
     'href',
-    'https://github.com/Renakoni/marktext-android',
+    APP_INFO.repositoryUrl,
   )
   await expect(page.getByTestId('settings-about-releases')).toHaveCount(0)
   await expect(page.getByTestId('settings-about-report-issue')).toHaveCount(0)
@@ -300,7 +300,7 @@ test('switches between document home and the settings about screen', async ({ pa
   await expect(page.getByTestId('settings-open-release')).toContainText('Open GitHub release')
   await expect(page.getByTestId('settings-open-release')).toHaveAttribute(
     'href',
-    'https://github.com/Renakoni/marktext-android/releases/tag/v1.0.0',
+    `${APP_INFO.releasesUrl}/tag/v1.0.0`,
   )
 
   await page.getByTestId('settings-detail-back').click()

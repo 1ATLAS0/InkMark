@@ -113,5 +113,5 @@ test('does not keep local drafts when the Documents local draft setting is disab
   await expect(page.getByTestId('draft-save-prompt')).toBeVisible()
   await expect(page.getByTestId('prompt-keep-draft-button')).toBeHidden()
   await page.getByTestId('prompt-discard-draft-button').click()
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
 })

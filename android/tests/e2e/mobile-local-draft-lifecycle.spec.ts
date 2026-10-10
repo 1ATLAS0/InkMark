@@ -14,7 +14,7 @@ test('creates a local draft from real editor input and returns it to the recent 
   await page.evaluate(() => localStorage.clear())
   await page.reload()
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByText('No recent Markdown files')).toBeVisible()
   await expect(page.getByTestId('open-file-button')).toBeVisible()
   await expect(page.getByTestId('new-document-button')).toBeVisible()
@@ -42,7 +42,7 @@ test('creates a local draft from real editor input and returns it to the recent 
   await expect(page.getByTestId('prompt-save-to-device-button')).toBeHidden()
   await page.getByTestId('prompt-keep-draft-button').click()
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Continue writing' })).toBeVisible()
   await expect(page.getByText('Fresh mobile note')).toBeVisible()
   await expect(page.getByText('No recent Markdown files')).toBeHidden()
@@ -84,7 +84,7 @@ test('gives each genuinely untitled draft a distinct, stable number', async ({ p
   })
   await page.reload()
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   // The two code-only drafts get distinct numbers (oldest first); the titled
   // one keeps its heading — normal derivation is untouched.
   await expect(page.getByText('Untitled-1', { exact: true })).toBeVisible()

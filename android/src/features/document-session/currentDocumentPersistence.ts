@@ -83,7 +83,7 @@ export interface CurrentDocumentPersistenceOptions {
   getAndroidEditorStatus: () => string
   getDraftLogStats: () => { characters: number, words: number, lines: number }
   // Store persistence and recents bookkeeping owned by App.
-  persistLocalDrafts: (drafts: LocalDraftRecord[]) => void
+  persistLocalDrafts: (drafts: LocalDraftRecord[]) => boolean
   persistAndroidRecentDocuments: (records: RecentDocumentRecord[]) => void
   rememberAndroidDocument: (document: OpenedAndroidDocument) => void
   // Autosave scheduler handles.
@@ -171,7 +171,13 @@ export function createCurrentDocumentPersistence(
     }
 
     try {
-      options.persistLocalDrafts(upsertLocalDraft(options.localDrafts.value, recoveryDraft))
+      if (!options.persistLocalDrafts(upsertLocalDraft(options.localDrafts.value, recoveryDraft))) {
+        options.draftLogger.warn('Android recovery draft did not fit the storage quota', {
+          sourceUri,
+          characters: markdown.length,
+        })
+        return false
+      }
     } catch (error) {
       options.draftLogger.error('failed to persist Android recovery draft', { sourceUri, error })
       return false
@@ -251,7 +257,12 @@ export function createCurrentDocumentPersistence(
     options.documentState.value = localDraftAutosave.savingDocument
 
     try {
-      options.persistLocalDrafts(localDraftAutosave.nextDrafts)
+      if (!options.persistLocalDrafts(localDraftAutosave.nextDrafts)) {
+        // The write was rejected (storage quota). Fail loudly so the status
+        // chip and the dirty flag stay truthful instead of reporting a save
+        // that never reached the store.
+        throw new Error('Local draft storage rejected the write')
+      }
       options.documentState.value = localDraftAutosave.savedDocument
       options.status.value = localDraftAutosave.hasContent ? 'Autosaved locally' : 'Ready'
       options.draftLogger.debug('local draft saved', options.getDraftLogStats())

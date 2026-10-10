@@ -57,7 +57,7 @@ test('returns a clean Android document to recent home from the Android back butt
     win.__emitCapacitorAppBackButton?.()
   })
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByTestId('editor-host')).toBeHidden()
   await expect(page.getByText('Clean Android Note')).toBeVisible()
 })
@@ -103,7 +103,7 @@ test('keeps a stale Android recent file on home with a recovery notice', async (
 
   await page.getByRole('button', { name: /Missing Android Note/ }).click()
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByTestId('editor-host')).toBeHidden()
   await expect(
     page.getByText('This file was moved or deleted. Open it again from Android.'),
@@ -204,7 +204,7 @@ test('shows a safe home notice when Android open-with rejects a non-Markdown fil
   await page.addInitScript(() => localStorage.clear())
   await page.goto('/')
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByTestId('editor-host')).toBeHidden()
   await expect(page.getByText('Open a Markdown file.')).toBeVisible()
 })
@@ -267,7 +267,7 @@ test('keeps dirty Android edits in the editor and in a recovery draft when save 
     page.getByText(/Reopen this file from Android before saving again/),
   ).toBeVisible()
   await page.getByTestId('prompt-keep-recovery-button').click()
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByText('Unsaved changes were kept as a recovery draft.')).toBeVisible()
 
   const drafts = await page.evaluate(() => localStorage.getItem('marktext-for-android:drafts') ?? '')
@@ -330,7 +330,7 @@ test('offers save-copy when leaving a dirty read-only Android document', async (
   await page.getByTestId('prompt-save-copy-button').click()
   await chooseThisPhoneSaveDestination(page)
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByText('Read Only Exit').first()).toBeVisible()
 
   const storage = await page.evaluate(() => ({
@@ -373,7 +373,7 @@ test('keeps temporary open-with edits in the imported draft when leaving', async
   await expect(page.getByTestId('prompt-keep-draft-button')).toBeVisible()
   await page.getByTestId('prompt-keep-draft-button').click()
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByText('Temporary Exit').first()).toBeVisible()
 
   const storage = await page.evaluate(() => ({

@@ -111,6 +111,7 @@ function createPersistence(overrides: {
     getDraftLogStats: () => ({ characters: 0, words: 0, lines: 0 }),
     persistLocalDrafts: vi.fn((drafts: LocalDraftRecord[]) => {
       localDrafts.value = drafts
+      return true
     }),
     persistAndroidRecentDocuments: vi.fn((records: RecentDocumentRecord[]) => {
       androidRecentDocuments.value = records
@@ -204,6 +205,12 @@ describe('currentDocumentPersistence', () => {
     })
     expect(failing.persistence.saveDraft()).toBe(false)
     expect(failing.options.status.value).toBe('Autosave failed')
+
+    // A quota rejection is reported, not thrown: the store returns false.
+    const rejected = createPersistence({ documentState: dirty })
+    rejected.options.persistLocalDrafts.mockImplementation(() => false)
+    expect(rejected.persistence.saveDraft()).toBe(false)
+    expect(rejected.options.status.value).toBe('Autosave failed')
   })
 
   it('reports whether an Android recovery draft was durably written', () => {
@@ -222,6 +229,10 @@ describe('currentDocumentPersistence', () => {
       throw new Error('quota exceeded')
     })
     expect(failing.persistence.persistAndroidRecoveryDraft(ANDROID_URI, '# edits')).toBe(false)
+
+    const rejected = createPersistence()
+    rejected.options.persistLocalDrafts.mockImplementation(() => false)
+    expect(rejected.persistence.persistAndroidRecoveryDraft(ANDROID_URI, '# edits')).toBe(false)
   })
 
   it('saves a dirty Android document, updates recents, and drops its recovery draft', async () => {

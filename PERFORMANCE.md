@@ -46,6 +46,7 @@ carrying a table, a fenced code block and inline math — a deliberately heavy c
 | 4 | `content-visibility: auto` plus `contain-intrinsic-size` on block elements, so off-screen blocks skip layout and paint | Scroll smoothness; open cost | **Reverted.** No change in the scroll metric, and it mistook the height of never-rendered blocks for scroll restoration; field reports of lag and visual artifacts while scrolling a selection pointed the same way |
 | 5 | Optional lightweight mode for very large documents (real-time highlighting and typesetting off by default, or a prompt on first open) | Fallback for the heaviest files | Planned |
 | 6 | Viewport virtualisation: keep DOM only for blocks near the viewport, materialise others on demand | Removes the cost class entirely | Long-term |
+| 7 | Move the draft store from `localStorage` to IndexedDB | Large documents stop being bounded by the measured ~5.2 M-character payload ceiling | Planned |
 
 ## Verification
 
@@ -79,17 +80,37 @@ the rule was gated by document size, which was itself a sign the trade was not w
 
 ## Field report follow-up
 
-Two symptoms reported while using the build that carried the deferred teardown and containment:
+Two symptoms reported while using the build that carried the deferred teardown and containment, both
+fixed and verified on the device:
 
 1. **Leaving a large document and immediately opening it again felt worse than either step alone.**
-   The deferred teardown could still be running when the next document started to mount, so the two
-   heavy operations overlapped. Teardown is now serialised: a parked instance is flushed before the
-   next open begins, with a fallback timer when no further document is opened.
+   Two problems stacked up here.
+   - *Teardown overlapped the next open.* The deferred teardown could still be running when the next
+     document started to mount. A parked instance is now detached from the document the moment it is
+     parked — it stops costing layout and paint immediately — and destroyed one second after the next
+     editor reports ready, with a fallback timer when no further document is opened.
+   - *The draft store ran into the storage quota.* Every open of a large file that Android cannot
+     write back keeps the content as a local draft, and a 1 MB document is a ~1.5 MB draft. A few of
+     them exhaust the origin: the measured ceiling for the draft payload is ~5.2 M characters, and the
+     write that overflowed was one an incoming open performs *before* mounting the editor — the
+     `QuotaExceededError` aborted the whole open transaction, so the document never opened. The store
+     now reports a rejected write instead of throwing, and the open path treats that failure as
+     non-fatal.
+
+   Verified on the device with the draft store filled to 94 % of its measured ceiling: the incoming
+   open logged the rejection (`local drafts did not fit the storage quota; nothing was written`),
+   continued mounting (`Muya init complete` 2.1 s after the intent, against 3.1 s for a cold open),
+   left the stored drafts untouched, reported no transaction failure, and put the cause on the home
+   screen ("Storage is full: this document has no local draft. Delete old drafts from Home to free
+   space."). Drafts are never evicted to make room — each record is the only durable copy of its
+   content — so freeing space stays an explicit user action; moving the draft store off `localStorage`
+   (plan item 7) removes the ceiling for good.
 2. **Scrolling while a text selection is active was very slow and left visual artifacts.** The
-   containment rule is the prime suspect (selections force the browser to render skipped subtrees)
-   and has been reverted. If the symptom survives the revert, the next suspects are the selection
-   toolbar and selection lifecycle work that runs during scroll; profiling that case needs the device
-   connected.
+   containment rule was the prime suspect (selections force the browser to render skipped subtrees)
+   and has been reverted. On the device, the same 12-swipe burst measured with and without an active
+   selection is now indistinguishable: 1 101 against 1 098 frames carrying high input latency, 0.18 %
+   janky frames and a 9–11 ms 99th percentile in both, with no artifacts in the captured frames. What
+   remains is the general cost of blocks entering the viewport, which is plan item 3.
 
 ## Re-measuring
 

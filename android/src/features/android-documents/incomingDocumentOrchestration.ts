@@ -78,7 +78,8 @@ export interface IncomingDocumentOrchestrationOptions {
   syncDocumentFromEditor: (markDirty: boolean, flushPending: boolean) => void
   persistAndroidRecoveryDraft: (sourceUri: string, markdown: string) => boolean
   canPersistLocalDrafts: () => boolean
-  persistLocalDrafts: (drafts: LocalDraftRecord[]) => void
+  persistLocalDrafts: (drafts: LocalDraftRecord[]) => boolean
+  draftStorageFullMessage: string
   // Called instead of replacing the editor when preservation was blocked: keep
   // the current editor mounted and let the user keep editing or discard + open.
   confirmIncomingOpenAfterBlockedPreserve: (request: BlockedIncomingOpenRequest) => void
@@ -106,16 +107,37 @@ export function createIncomingDocumentOrchestration(
 ): IncomingDocumentOrchestration {
   let listeners: AndroidDocumentIntentListeners | null = null
 
+  /**
+   * Keeps the incoming draft when it fits the storage quota. Reports false
+   * only when the write was rejected: the open still proceeds — a full draft
+   * store used to abort the whole transaction — and the caller swaps the
+   * confirmation notice for the storage message.
+   */
+  function persistIncomingLocalDraft(draft: LocalDraftRecord | null): boolean {
+    if (!draft || !options.canPersistLocalDrafts()) {
+      return true
+    }
+
+    const persisted = options.persistLocalDrafts(upsertLocalDraft(options.localDrafts.value, draft))
+    if (!persisted) {
+      options.documentLogger.warn('incoming document draft was not persisted', {
+        id: draft.id,
+        characters: draft.markdown.length,
+      })
+    }
+    return persisted
+  }
+
   async function openSharedTextDocument(document: SharedAndroidDocument) {
     const openResult = createSharedTextDocumentOpenResult(document, {
       sharedTextImportedMessage: options.sharedTextImportedMessage,
       logger: options.documentLogger,
     })
 
-    if (options.canPersistLocalDrafts()) {
-      options.persistLocalDrafts(upsertLocalDraft(options.localDrafts.value, openResult.localDraft))
-    }
-    options.homeNotice.value = openResult.homeNotice
+    const draftPersisted = persistIncomingLocalDraft(openResult.localDraft)
+    options.homeNotice.value = draftPersisted
+      ? openResult.homeNotice
+      : options.draftStorageFullMessage
     options.promptLocalDraftSaveOnExit.value = openResult.promptLocalDraftSaveOnExit
     options.currentAndroidDocumentCanWrite.value = openResult.currentAndroidDocumentCanWrite
     options.documentState.value = openResult.documentState
@@ -143,10 +165,10 @@ export function createIncomingDocumentOrchestration(
     })
 
     options.protectIncomingDocumentImages(document)
-    if (openResult.localDraft && options.canPersistLocalDrafts()) {
-      options.persistLocalDrafts(upsertLocalDraft(options.localDrafts.value, openResult.localDraft))
-    }
-    options.homeNotice.value = openResult.homeNotice
+    const draftPersisted = persistIncomingLocalDraft(openResult.localDraft)
+    options.homeNotice.value = draftPersisted
+      ? openResult.homeNotice
+      : options.draftStorageFullMessage
     options.promptLocalDraftSaveOnExit.value = openResult.promptLocalDraftSaveOnExit
     options.currentAndroidDocumentCanWrite.value = openResult.currentAndroidDocumentCanWrite
     options.documentState.value = openResult.documentState

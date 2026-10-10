@@ -123,11 +123,18 @@ function scheduleTeardown(instance: MuyaEditor | null, options: { destroyMuyaEdi
   if (!instance) {
     return
   }
+  // Take the old tree out of the document first: it stops costing layout and
+  // paint immediately, and keeps the memory peak lower while a second editor
+  // is being built.
+  instance.domNode?.remove()
+  if (pendingTeardown) {
+    flushPendingTeardown(options)
+  }
   pendingTeardown = instance
   if (pendingTeardownTimer !== null) {
     window.clearTimeout(pendingTeardownTimer)
   }
-  pendingTeardownTimer = window.setTimeout(() => flushPendingTeardown(options), 1500)
+  pendingTeardownTimer = window.setTimeout(() => flushPendingTeardown(options), 4000)
 }
 
 function flushPendingTeardown(options: { destroyMuyaEditor: (editor: MuyaEditor | null) => void }) {
@@ -266,6 +273,10 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
       options.syncMarkdown('Ready')
       editorFailed.value = false
       editorReady.value = true
+      // The new document is usable: clean up a parked instance now instead of
+      // before the mount, so re-opening a large file costs the same as opening
+      // it the first time.
+      window.setTimeout(() => flushPendingTeardown(options), 1000)
       options.logger.info('Muya init complete', {
         characters: options.documentState.value.stats.characters,
         words: options.documentState.value.stats.words,
@@ -301,10 +312,6 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
   }
 
   async function openEditor(markdown: string) {
-    // Finish any parked teardown first: mount and teardown are both heavy and
-    // must not overlap (rapid close → open would otherwise stack them).
-    flushPendingTeardown(options)
-
     const generation = ++openGeneration
     lastOpenedMarkdown = markdown
     editorFailed.value = false

@@ -438,7 +438,7 @@ test('shows a safe notice when an Android share is rejected', async ({ page }) =
   await page.addInitScript(() => localStorage.clear())
   await page.goto('/')
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByText('Share Markdown text or a Markdown file.')).toBeVisible()
   await expect(page.getByTestId('editor-host')).toBeHidden()
 })
@@ -453,7 +453,7 @@ test('uses share-specific copy for unsupported shared file URIs', async ({ page 
   await page.addInitScript(() => localStorage.clear())
   await page.goto('/')
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByText('This Android share did not provide a supported file URI.')).toBeVisible()
   await expect(page.getByText('This recent file can no longer be opened.')).toBeHidden()
 })

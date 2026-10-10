@@ -47,6 +47,7 @@ function createOrchestration(overrides: {
   recoveryKept?: boolean
   canPersistDrafts?: boolean
   localDrafts?: LocalDraftRecord[]
+  draftPersisted?: boolean
 } = {}) {
   const options = {
     currentScreen: ref<AppScreen>(overrides.currentScreen ?? 'home'),
@@ -63,6 +64,7 @@ function createOrchestration(overrides: {
     currentAndroidDocumentCanWrite: ref(true),
     sharedTextImportedMessage: 'Imported shared text as a local draft.',
     incomingFileImportedMessage: 'Imported this file as a local draft.',
+    draftStorageFullMessage: 'Storage is full: no local draft was kept.',
     openWithTemporaryAccessMessage: 'open-with temporary access',
     shareTemporaryAccessMessage: 'share temporary access',
     hasEditor: () => overrides.hasEditor ?? false,
@@ -77,7 +79,7 @@ function createOrchestration(overrides: {
     syncDocumentFromEditor: vi.fn(),
     persistAndroidRecoveryDraft: vi.fn(() => overrides.recoveryKept ?? true),
     canPersistLocalDrafts: () => overrides.canPersistDrafts ?? true,
-    persistLocalDrafts: vi.fn(),
+    persistLocalDrafts: vi.fn((_drafts: LocalDraftRecord[]) => overrides.draftPersisted ?? true),
     confirmIncomingOpenAfterBlockedPreserve: vi.fn(),
     getAndroidDocumentUserMessage,
     appLogger: noopLogger,
@@ -438,6 +440,23 @@ describe('incomingDocumentOrchestration', () => {
     expect(options.openEditor).toHaveBeenCalledWith('# Incoming')
     expect(options.status.value).toBe('Imported this file as a local draft.')
     expect(options.releaseEditorFocusAfterOpen).toHaveBeenCalled()
+  })
+
+  it('still opens the document when the draft store rejects the incoming draft', async () => {
+    // A full storage quota used to throw out of this write and abort the
+    // whole incoming-open transaction, so the document never opened.
+    const { orchestration, options } = createOrchestration({
+      currentScreen: 'home',
+      draftPersisted: false,
+    })
+    const temporaryDocument = { ...incomingDocument, persisted: false, canWrite: false }
+
+    await orchestration.handleOpenWithDocumentEvent({ document: temporaryDocument, error: null })
+
+    expect(options.persistLocalDrafts).toHaveBeenCalledTimes(1)
+    expect(options.openEditor).toHaveBeenCalledWith('# Incoming')
+    expect(options.homeNotice.value).toBe('Storage is full: no local draft was kept.')
+    expect(options.status.value).toBe('Imported this file as a local draft.')
   })
 
   it('keeps the temporary-access notice for open-with when local drafts are disabled', async () => {

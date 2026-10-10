@@ -69,10 +69,38 @@ describe('documentStorage', () => {
     const storage = new MemoryStorage()
     storage.setItem(LEGACY_DRAFT_STORAGE_KEY, '# Legacy draft')
 
-    writeStoredLocalDrafts([localDraft], storage)
+    expect(writeStoredLocalDrafts([localDraft], storage)).toBe(true)
 
     expect(readStoredLocalDrafts(storage)).toEqual([localDraft])
     expect(readLegacyDraft(storage)).toBeNull()
+  })
+
+  it('reports a rejected draft write and leaves the stored records untouched', () => {
+    // A full quota must not throw into the open path, and must not cost the
+    // drafts already on disk: they are the only durable copies.
+    const storage = new MemoryStorage()
+    storage.setItem(LOCAL_DRAFTS_STORAGE_KEY, JSON.stringify([localDraft]))
+    storage.setItem(LEGACY_DRAFT_STORAGE_KEY, '# Legacy draft')
+    const rejectingStorage = {
+      getItem: (key: string) => storage.getItem(key),
+      removeItem: (key: string) => storage.removeItem(key),
+      setItem: (key: string, value: string) => {
+        if (key === LOCAL_DRAFTS_STORAGE_KEY) {
+          throw new DOMException('quota exceeded (injected)', 'QuotaExceededError')
+        }
+        storage.setItem(key, value)
+      },
+    }
+    const incomingDraft: LocalDraftRecord = {
+      ...localDraft,
+      id: 'draft-2',
+      updatedAt: '2026-06-29T00:02:00.000Z',
+    }
+
+    expect(writeStoredLocalDrafts([incomingDraft, localDraft], rejectingStorage)).toBe(false)
+
+    expect(readStoredLocalDrafts(storage)).toEqual([localDraft])
+    expect(readLegacyDraft(storage)).toBe('# Legacy draft')
   })
 
   it('removes the local drafts key and legacy key for an empty draft list', () => {
@@ -80,7 +108,7 @@ describe('documentStorage', () => {
     storage.setItem(LOCAL_DRAFTS_STORAGE_KEY, JSON.stringify([localDraft]))
     storage.setItem(LEGACY_DRAFT_STORAGE_KEY, '# Legacy draft')
 
-    writeStoredLocalDrafts([], storage)
+    expect(writeStoredLocalDrafts([], storage)).toBe(true)
 
     expect(storage.getItem(LOCAL_DRAFTS_STORAGE_KEY)).toBeNull()
     expect(storage.getItem(LEGACY_DRAFT_STORAGE_KEY)).toBeNull()

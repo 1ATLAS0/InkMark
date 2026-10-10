@@ -233,7 +233,7 @@ test('saves a read-only Android document as a writable copy', async ({ page }) =
   await expect(page.getByText('Saved', { exact: true })).toBeVisible()
   await page.getByTestId('back-button').click()
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByText('Read Only Original').first()).toBeVisible()
 
   const recentDocuments = await page.evaluate(
@@ -425,7 +425,7 @@ test('keeps the local draft when Android document access is not persisted', asyn
   await page.getByTestId('prompt-save-to-device-button').click()
   await chooseThisPhoneSaveDestination(page)
 
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(
     page.getByText('Saved to device. Kept local draft because Android did not grant long-term access.'),
   ).toBeVisible()
@@ -452,6 +452,6 @@ test('keeps the Android open-file action nonfatal in the browser shell', async (
   await page.getByRole('button', { name: /This phone/ }).click()
 
   await expect(page.getByText('Open Markdown files from the Android app build.')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'MarkText' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByTestId('new-document-button')).toBeVisible()
 })
