@@ -108,6 +108,40 @@ export function normalizeEditorMarkdown(markdown: string) {
 // shows up as a stalled frame when leaving the editor.
 const LARGE_DOCUMENT_TEARDOWN_CHARS = 200_000
 
+/**
+ * Tears down a large editor, but never while another editor is being created:
+ * the two would fight over the main thread, which is what made "leave a large
+ * document and immediately open it again" feel worse than either step alone.
+ *
+ * The instance is parked here and flushed before the next open starts, with a
+ * fallback timer for the case where no further document is opened.
+ */
+let pendingTeardown: MuyaEditor | null = null
+let pendingTeardownTimer: number | null = null
+
+function scheduleTeardown(instance: MuyaEditor | null, options: { destroyMuyaEditor: (editor: MuyaEditor | null) => void }) {
+  if (!instance) {
+    return
+  }
+  pendingTeardown = instance
+  if (pendingTeardownTimer !== null) {
+    window.clearTimeout(pendingTeardownTimer)
+  }
+  pendingTeardownTimer = window.setTimeout(() => flushPendingTeardown(options), 1500)
+}
+
+function flushPendingTeardown(options: { destroyMuyaEditor: (editor: MuyaEditor | null) => void }) {
+  if (pendingTeardownTimer !== null) {
+    window.clearTimeout(pendingTeardownTimer)
+    pendingTeardownTimer = null
+  }
+  const instance = pendingTeardown
+  pendingTeardown = null
+  if (instance) {
+    options.destroyMuyaEditor(instance)
+  }
+}
+
 export function createEditorSession(options: EditorSessionOptions): EditorSession {
   const editorElement = ref<HTMLElement | null>(null)
   const editorReady = ref(false)
@@ -267,6 +301,10 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
   }
 
   async function openEditor(markdown: string) {
+    // Finish any parked teardown first: mount and teardown are both heavy and
+    // must not overlap (rapid close → open would otherwise stack them).
+    flushPendingTeardown(options)
+
     const generation = ++openGeneration
     lastOpenedMarkdown = markdown
     editorFailed.value = false
@@ -333,9 +371,7 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
     const editorToDestroy = editor
     editor = null
     if ((lastOpenedMarkdown?.length ?? 0) > LARGE_DOCUMENT_TEARDOWN_CHARS) {
-      window.requestAnimationFrame(() => {
-        window.setTimeout(() => options.destroyMuyaEditor(editorToDestroy), 0)
-      })
+      scheduleTeardown(editorToDestroy, options)
     }
     else {
       options.destroyMuyaEditor(editorToDestroy)

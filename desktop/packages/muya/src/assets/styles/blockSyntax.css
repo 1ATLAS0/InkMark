@@ -1097,17 +1097,3 @@ pre.mu-active.mu-fenced-code::after {
 .mu-container figure.mu-footnote > i.mu-footnote-backlink:hover {
     color: var(--theme-color);
 }
-
-/* Off-screen blocks skip style, layout and paint. `contain-intrinsic-size: auto`
-   lets the browser remember a block's last rendered height, so the scrollbar
-   stays stable once a block has been seen; the fallback estimate only applies to
-   blocks that have never been rendered.
-
-   Measured on the Android target: scroll-time input latency came from appended
-   blocks being laid out on the main thread even when they sat far outside the
-   viewport. The `auto` keyword keeps scroll anchoring stable, and Chromium
-   always renders the focused block, so the caret is unaffected. */
-.mu-container.mu-large-document > * {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 2.5em;
-}
