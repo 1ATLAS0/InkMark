@@ -43,7 +43,7 @@ carrying a table, a fenced code block and inline math — a deliberately heavy c
 | 1 | Pause background mounting while the reader is interacting; resume once the surface is quiet | Input latency during scroll | Implemented (`_interactionPauseMs` in the scroll page scheduler) |
 | 2 | Dispose large editors after the home screen has had a frame; small documents still tear down inline | Sub-second frames when leaving | Implemented (deferred teardown above a document-size threshold) |
 | 3 | Run syntax highlighting and math typesetting only for blocks near the viewport, with placeholders elsewhere | Long-running CPU after open | Planned |
-| 4 | `content-visibility: auto` plus `contain-intrinsic-size` on block elements, so off-screen blocks skip layout and paint | Scroll smoothness; open cost | Planned |
+| 4 | `content-visibility: auto` plus `contain-intrinsic-size` on block elements, so off-screen blocks skip layout and paint | Scroll smoothness; open cost | Implemented, gated to documents above 600 blocks — measured no change in the scroll metric (see below) |
 | 5 | Optional lightweight mode for very large documents (real-time highlighting and typesetting off by default, or a prompt on first open) | Fallback for the heaviest files | Planned |
 | 6 | Viewport virtualisation: keep DOM only for blocks near the viewport, materialise others on demand | Removes the cost class entirely | Long-term |
 
@@ -65,6 +65,17 @@ Re-measured on the same device with the screen kept awake, comparing against the
   thread after each chunk regardless of JavaScript pacing. Item 4 targets exactly that cost.
 - **Open cost is unchanged**, as expected: neither measure reduces the total work of mounting and
   rendering the document. That is item 3 territory.
+
+Measured again with containment enabled (documents above 600 blocks): the input-latency added by 15
+swipes stayed at the same level (+3 928 against +3 586 without it), while jank stayed low (0.31%,
+99th percentile 38 ms). Containment spares off-screen blocks, but a fast scroll keeps bringing new
+blocks into view, and those still have to be realised — including syntax highlighting and math
+typesetting, which is item 3. Containment is kept because it costs nothing measurable and is a
+prerequisite for virtualisation later.
+
+Because containment makes the height of never-rendered blocks an estimate, scroll restoration and
+outline jumps can land slightly off in large documents. Both are covered by tests; the rule is
+gated by document size so ordinary notes keep exact geometry.
 
 ## Re-measuring
 

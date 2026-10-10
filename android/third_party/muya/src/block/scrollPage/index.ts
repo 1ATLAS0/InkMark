@@ -106,6 +106,13 @@ export class ScrollPage extends Parent {
     // interaction event and let it resume once the surface is quiet again.
     private static readonly _interactionPauseMs = 200;
 
+    // Documents at or above this many top-level blocks get CSS containment, which
+    // lets the browser skip style, layout and paint for off-screen blocks. Below
+    // the threshold the exact geometry is kept: containment makes the height of
+    // never-rendered blocks an estimate, which would make scroll restoration and
+    // outline jumps land a little off.
+    private static readonly _containmentBlockThreshold = 600;
+
     private _pendingMount: {
         handle: ReturnType<typeof setTimeout> | null;
     } | null = null;
@@ -206,6 +213,9 @@ export class ScrollPage extends Parent {
     // `lastContentInDescendant`, search) mount what they need through
     // `ensureMountedThrough` / `flushPendingMount`.
     private _mountBlocks(state: TState[]) {
+        if (state.length >= ScrollPage._containmentBlockThreshold)
+            this.domNode?.classList.add('mu-large-document');
+
         const initial = takeByWeight(state, 0, ScrollPage._initialMountWeight);
         this._appendFromState(state, 0, initial);
 
