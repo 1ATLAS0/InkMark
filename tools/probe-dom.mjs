@@ -7,10 +7,15 @@
  *   2) node tools/probe-dom.mjs "document.title"
  *      node tools/probe-dom.mjs --port 9222 "document.querySelector('.title-bar').outerHTML"
  */
+import { readFileSync } from 'node:fs'
+
 const args = process.argv.slice(2)
 const portIdx = args.indexOf('--port')
 const port = portIdx >= 0 ? Number(args[portIdx + 1]) : 9222
-const expr = args.filter((a, i) => (portIdx < 0 || (i !== portIdx && i !== portIdx + 1))).join(' ')
+const fileIdx = args.indexOf('--file')
+const expr = fileIdx >= 0
+  ? readFileSync(args[fileIdx + 1], 'utf-8')
+  : args.filter((a, i) => (portIdx < 0 || (i !== portIdx && i !== portIdx + 1)) && !(fileIdx >= 0 && (i === fileIdx || i === fileIdx + 1))).join(' ')
 
 if (!expr) {
   console.error('用法: node tools/probe-dom.mjs [--port 9222] "<js 表达式>"')
