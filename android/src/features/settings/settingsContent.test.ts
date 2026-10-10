@@ -255,8 +255,9 @@ describe('settings content governance', () => {
     const themeModeRow = getRows().find(row => row.id === 'themeMode')
     const customThemeRow = getRows().find(row => row.id === 'customTheme')
 
+    // The bundled light theme is the branded one (see tools/rebrand.mjs).
     expect(APPEARANCE_FIXED_THEME_IDS).toEqual({
-      light: 'graphite',
+      light: 'classic-light',
       dark: 'dark',
     })
     expect(themeModeRow?.kind).toBe('choice')

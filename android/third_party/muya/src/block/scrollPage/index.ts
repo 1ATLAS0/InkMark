@@ -100,9 +100,18 @@ export class ScrollPage extends Parent {
     private static readonly _initialMountWeight = 512;
     private static readonly _chunkBudgetMs = 4;
 
+    // While the user is scrolling or touching the document, background chunks
+    // compete with input for the main thread: frames still render, but taps and
+    // scroll gestures feel late. Pause the chain for this long after the last
+    // interaction event and let it resume once the surface is quiet again.
+    private static readonly _interactionPauseMs = 200;
+
     private _pendingMount: {
         handle: ReturnType<typeof setTimeout> | null;
     } | null = null;
+
+    // Timestamp until which background mounting stays paused (see _scheduleNextChunk).
+    private _interactionUntil = 0;
 
     // See suspendOnDemandMount().
     private _onDemandMountSuspended = false;
@@ -136,6 +145,14 @@ export class ScrollPage extends Parent {
         const { domNode } = this;
 
         eventCenter.attachDOMEvent(domNode!, 'click', this._clickHandler.bind(this));
+
+        // Touch, wheel and scroll all mean "the reader is interacting": defer
+        // the pending mount chain until the surface has been quiet for a moment.
+        const markInteraction = () => {
+            this._interactionUntil = performance.now() + ScrollPage._interactionPauseMs;
+        };
+        for (const eventName of ['touchstart', 'touchmove', 'wheel', 'scroll'] as const)
+            eventCenter.attachDOMEvent(domNode!, eventName, markInteraction);
     }
 
     updateState(state: TState[]) {
@@ -214,10 +231,12 @@ export class ScrollPage extends Parent {
         if (!this._pendingMount)
             return;
 
+        // Wait out any ongoing interaction before doing more background work.
+        const wait = Math.max(0, this._interactionUntil - performance.now());
         // setTimeout keeps mounting while the tab is backgrounded (rAF stalls).
         this._pendingMount.handle = setTimeout(() => {
             this._mountNextChunk();
-        }, 0);
+        }, wait);
     }
 
     private _mountNextChunk() {

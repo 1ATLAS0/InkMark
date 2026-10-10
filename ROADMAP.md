@@ -36,6 +36,12 @@ Open:
   Android WebViews because they were hidden with `font-size: 0` only, which WebView font clamping can override;
   a 1 MB document therefore read as raw Markdown. Hiding now also sets `visibility: hidden`. Verified on a vivo
   device: a 1 MB document renders completely, including the tail and inline math.
+- **Large documents on Android: performance.** The document renders correctly, but the engine builds and
+  renders every block, so a 1 MB file keeps the main thread busy for over a minute after opening —
+  scrolling feels laggy (input latency, not dropped frames) and leaving the editor produces a
+  sub-second frame. Interaction-aware mount pausing and deferred teardown have shipped; on-demand
+  highlighting and typesetting, CSS containment and virtualisation are still open. Measurements and
+  the ordered plan live in [PERFORMANCE.md](PERFORMANCE.md).
 - **Encoding.** GB18030/GBK detection and CRLF handling need a test pass with real files.
 
 ## 0.21 — editing and export

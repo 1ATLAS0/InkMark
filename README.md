@@ -69,6 +69,7 @@ Toolchain notes:
     tools/      build, branding, signing and measurement scripts
     demo*.md    documents used to check rendering output
     ROADMAP.md  milestones, known issues and release process
+    PERFORMANCE.md  large-document measurements and the optimization plan
 
 ## Branding
 

@@ -61,6 +61,7 @@ Android 端：
     tools/      构建、品牌、签名与测量脚本
     demo*.md    用于检查渲染结果的示例文档
     ROADMAP.md  里程碑、已知问题与发布流程
+    PERFORMANCE.md  大文档实测数据与优化计划
 
 ## 品牌化
 

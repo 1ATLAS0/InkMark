@@ -104,6 +104,10 @@ export function normalizeEditorMarkdown(markdown: string) {
  * scheduling, toolbar behavior, and navigation policy stay with App and are
  * reached only through the injected collaborators.
  */
+// Documents above this size take long enough to tear down that doing it inline
+// shows up as a stalled frame when leaving the editor.
+const LARGE_DOCUMENT_TEARDOWN_CHARS = 200_000
+
 export function createEditorSession(options: EditorSessionOptions): EditorSession {
   const editorElement = ref<HTMLElement | null>(null)
   const editorReady = ref(false)
@@ -321,8 +325,21 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
     uninstallEditorSelectionDiagnostics()
     uninstallEditorInputDiagnostics()
     void options.uninstallNativeSelectionTapListener()
-    options.destroyMuyaEditor(editor)
+    // Tearing down a large document (tens of thousands of nodes, plus KaTeX and
+    // highlight caches) blocks the main thread for up to a second. Hand those
+    // instances over and dispose them after the home screen has had a frame, so
+    // leaving the editor stays instant. Small documents tear down inline: the
+    // work is invisible and keeping it synchronous keeps the lifecycle simple.
+    const editorToDestroy = editor
     editor = null
+    if ((lastOpenedMarkdown?.length ?? 0) > LARGE_DOCUMENT_TEARDOWN_CHARS) {
+      window.requestAnimationFrame(() => {
+        window.setTimeout(() => options.destroyMuyaEditor(editorToDestroy), 0)
+      })
+    }
+    else {
+      options.destroyMuyaEditor(editorToDestroy)
+    }
     if (destroyOptions.updateSelectionMenuSuppression !== false) {
       void options.setEditorSelectionMenuSuppression(false, 'editor-destroy')
     }
