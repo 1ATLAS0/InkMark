@@ -47,9 +47,24 @@ carrying a table, a fenced code block and inline math — a deliberately heavy c
 | 5 | Optional lightweight mode for very large documents (real-time highlighting and typesetting off by default, or a prompt on first open) | Fallback for the heaviest files | Planned |
 | 6 | Viewport virtualisation: keep DOM only for blocks near the viewport, materialise others on demand | Removes the cost class entirely | Long-term |
 
-Items 1 and 2 are implemented and covered by the existing test suites (721 unit tests). Their effect
-still needs a controlled re-measurement: the first attempt was confounded by the screen locking and
-the system freezing the application, which also drives CPU readings to zero.
+## Verification
+
+Re-measured on the same device with the screen kept awake, comparing against the numbers above:
+
+| Metric | Before | After |
+|---|---|---|
+| App CPU after open (8/15/25/40/60 s) | 43% → 24% → 23% → 27% → 27% | 43% → 27% → 20% → 20% → 27% |
+| Worst frame when leaving the editor | 950 ms | **61 ms** |
+| High input latency added by 15 swipes | not comparable (earlier counter was cumulative) | +3 586 |
+
+- **Deferred teardown works.** The frame after the back press no longer waits for the teardown; the
+  worst frame fell from 950 ms to 61 ms. The teardown itself still runs, just off the critical path —
+  items 3 and 6 would reduce it rather than move it.
+- **Pausing during interaction does not move the scroll metric.** The added input latency stays high
+  because it is dominated by style and layout of newly appended blocks, which happens on the main
+  thread after each chunk regardless of JavaScript pacing. Item 4 targets exactly that cost.
+- **Open cost is unchanged**, as expected: neither measure reduces the total work of mounting and
+  rendering the document. That is item 3 territory.
 
 ## Re-measuring
 
