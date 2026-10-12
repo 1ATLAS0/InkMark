@@ -424,3 +424,26 @@ button.button-primary:not(.custom):focus,
 .el-tabs__active-bar {
   background-color: var(--themeColor);
 }
+
+/* The Windows text I-beam is a white body with a hairline outline: on the
+   light themes' white page it all but disappears. Text surfaces therefore use
+   a shipped I-beam — dark body, light halo — that reads on every theme. The
+   `text` keyword stays last so a missing image still degrades to the OS
+   pointer, and the 2x bitmap keeps the pointer crisp on scaled displays. */
+body .mu-container,
+body .CodeMirror-lines,
+body .CodeMirror textarea,
+body input,
+body textarea {
+  cursor: url("../images/text-cursor.png") 6 12, text;
+}
+
+@media (min-resolution: 1.5dppx) {
+  body .mu-container,
+  body .CodeMirror-lines,
+  body .CodeMirror textarea,
+  body input,
+  body textarea {
+    cursor: url("../images/text-cursor@2x.png") 6 12, text;
+  }
+}

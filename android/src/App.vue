@@ -1087,6 +1087,27 @@ function insertMarkdownAtPendingSelection(markdown: string) {
   return insertTextAtRestoredSelection(markdown, pendingInlineInsertRange)
 }
 
+// Dragging the app's caret handle moves the insertion point: the DOM caret
+// under the pointer becomes the editor's caret (Muya's model synced with it),
+// which keeps the keyboard up and leaves no gesture-made selection for the
+// WebView to attach its own handle to.
+function moveEditorCaretFromHandle(range: Range) {
+  const activeEditor = getEditor()
+  if (!activeEditor || !range.collapsed) {
+    return
+  }
+
+  // The editor's own DOM node, not the host slot: the slot ref can already be
+  // detached while the engine keeps rendering into the live node (the same
+  // reason the selection lifecycle resolves the node from the instance).
+  const editorRoot = activeEditor.domNode ?? getEditorElement()
+  if (!editorRoot?.contains(range.startContainer)) {
+    return
+  }
+
+  restoreEditorInsertionCaret(activeEditor, range)
+}
+
 function openLinkSheet(restoreRange: Range | null = null) {
   const editorPresent = hasEditor()
   const capturedRange =
@@ -2988,6 +3009,7 @@ onBeforeUnmount(() => {
     @run-table-command="runEditorTableCommand"
     @run-selection-command="runEditorSelectionCommand"
     @dismiss-selection="finishSelectionToolbarOutsideTap"
+    @move-caret="moveEditorCaretFromHandle"
     @open-link="openEditorLink"
     @toggle-toolbar="toggleEditorToolbarExclusive"
     @set-toolbar-panel="setEditorToolbarPanel"

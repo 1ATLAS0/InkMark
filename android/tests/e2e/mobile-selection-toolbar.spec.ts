@@ -329,11 +329,17 @@ test('a subsequent tap dismisses the long-press caret toolbar', async ({ page })
   const toolbar = page.getByTestId('mobile-selection-toolbar')
   await expect(toolbar).toBeVisible()
 
-  await page
+  // A raw tap at the paragraph's centre, not locator.click(): the caret handle
+  // hangs off the caret's line and legitimately sits above text below it (the
+  // same way the WebView's own handle does), so the click must go through the
+  // handle's own tap handling rather than Playwright's actionability check.
+  const paragraph = await page
     .locator('[data-testid="editor-host"] .mu-editor p')
     .filter({ hasText: 'Second paragraph tail' })
     .first()
-    .click()
+    .boundingBox()
+  expect(paragraph).not.toBeNull()
+  await page.mouse.click(paragraph!.x + paragraph!.width / 2, paragraph!.y + paragraph!.height / 2)
 
   await expect(toolbar).toBeHidden()
 })

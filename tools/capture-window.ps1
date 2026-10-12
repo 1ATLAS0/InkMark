@@ -1,4 +1,4 @@
-# 截取指定进程的主窗口（用 PrintWindow，不依赖窗口是否在前台）
+﻿# 截取指定进程的主窗口（用 PrintWindow，不依赖窗口是否在前台）
 # 用法: powershell -ExecutionPolicy Bypass -File tools\capture-window.ps1 [-ProcessName inkmark] [-Out path.png]
 param(
   [string]$ProcessName = "inkmark",

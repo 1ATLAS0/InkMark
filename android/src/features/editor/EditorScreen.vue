@@ -119,6 +119,7 @@ const emit = defineEmits<{
   'run-table-command': [commandId: TableCommandId]
   'run-selection-command': [commandId: SelectionToolbarCommandId, restoreRange: Range | null]
   'dismiss-selection': [caretRange: Range | null]
+  'move-caret': [range: Range]
   'open-link': [href: string]
   'toggle-toolbar': []
   'set-toolbar-panel': [panel: MobileEditorToolbarPanel]
@@ -634,6 +635,7 @@ onBeforeUnmount(() => {
         (commandId, restoreRange) => emit('run-toolbar-command', commandId, restoreRange)
       "
       @dismiss-selection="caretRange => emit('dismiss-selection', caretRange)"
+      @move-caret="range => emit('move-caret', range)"
     />
 
     <LinkActionOverlay
