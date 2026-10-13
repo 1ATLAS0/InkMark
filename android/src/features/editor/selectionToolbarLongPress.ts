@@ -122,9 +122,7 @@ export function createSelectionToolbarLongPress({
       if (
         event.target instanceof Node &&
         event.target instanceof Element &&
-        event.target.closest(
-          '[data-testid="mobile-selection-toolbar"], [data-testid="caret-handle"]',
-        )
+        event.target.closest('[data-testid="mobile-selection-toolbar"]')
       ) {
         return
       }

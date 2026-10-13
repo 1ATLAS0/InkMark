@@ -11,9 +11,12 @@ import LocalDraftExitPrompt from './components/LocalDraftExitPrompt.vue'
 import IncomingOpenPrompt from './components/IncomingOpenPrompt.vue'
 import MobileEditorToolbar from './components/MobileEditorToolbar.vue'
 import MobileSelectionToolbar from './components/MobileSelectionToolbar.vue'
+import MobileCaretHandle from './components/MobileCaretHandle.vue'
 import LinkActionOverlay from './components/LinkActionOverlay.vue'
 import ResumeCard from './components/ResumeCard.vue'
 import EditorFailurePanel from './components/EditorFailurePanel.vue'
+import { createEditorCaretHandle } from './editorCaretHandle'
+import { createLogger } from '../../lib/logger'
 import type { SelectionToolbarCommandId } from './selectionToolbar'
 import type { TableCommandId } from './tableCommands'
 import type { SelectionToolbarRows } from './selectionToolbarSettings'
@@ -213,6 +216,38 @@ const selectionToolbarSuspended = computed(
     props.androidExitPromptOpen ||
     props.incomingOpenPromptOpen,
 )
+
+// The app's own caret handle takes the place of the WebView's insertion
+// handle after any gesture that leaves a collapsed caret in the editor — a
+// plain tap as much as a long-press. It is independent of the selection
+// toolbar (which serves selections and caret sessions): the handle simply
+// follows the caret, the way the native handle does.
+const {
+  rect: caretHandleRect,
+  visible: caretHandleVisible,
+  dragging: caretHandleDragging,
+  notifyDragStarted: notifyCaretHandleDragStarted,
+  notifyDragEnded: notifyCaretHandleDragEnded,
+  refresh: refreshCaretHandle,
+  teardown: teardownCaretHandle,
+} = createEditorCaretHandle({
+  isEditorReady: () => props.editorReady,
+  // Sheets, prompts, the menu and source mode own the interaction surface.
+  canActivate: () => !selectionToolbarSuspended.value && !props.sourceModeActive,
+  // The stable containment root: Muya replaces the inner host element during
+  // init, so the shell is what selection checks qualify against.
+  getEditorHost: () => editorShell.value,
+  logger: createLogger('editor'),
+})
+
+// A competing surface taking over the interaction must put the handle away
+// deterministically — the same reason the selection toolbar watches its
+// suspended prop. Source mode replaces the WYSIWYG surface entirely, and a
+// re-initializing editor has no caret to follow yet.
+watch(
+  () => [selectionToolbarSuspended.value, props.sourceModeActive, props.editorReady] as const,
+  () => refreshCaretHandle(),
+)
 const linkInsertDispatching = ref(false)
 const linkInsertSheet = ref<InstanceType<typeof LinkInsertSheet> | null>(null)
 const linkSheetBackgroundAriaHidden = computed(() =>
@@ -347,6 +382,7 @@ watch(
 watch(editorHost, element => emit('editor-host-change', element), { immediate: true })
 
 onBeforeUnmount(() => {
+  teardownCaretHandle()
   emit('editor-host-change', null)
 })
 </script>
@@ -635,8 +671,21 @@ onBeforeUnmount(() => {
         (commandId, restoreRange) => emit('run-toolbar-command', commandId, restoreRange)
       "
       @dismiss-selection="caretRange => emit('dismiss-selection', caretRange)"
-      @move-caret="range => emit('move-caret', range)"
     />
+
+    <!-- The app's own caret handle: teleported to the body so no transformed
+         ancestor can trap or offset a fixed child. Shown for any gesture that
+         leaves a collapsed caret in the editor; the drag keeps it mounted even
+         if the caret it followed is gone by the time the finger lifts. -->
+    <Teleport to="body">
+      <MobileCaretHandle
+        v-if="!sourceModeActive && (caretHandleVisible || caretHandleDragging)"
+        :caret-rect="caretHandleRect"
+        @move-caret="range => emit('move-caret', range)"
+        @drag-start="notifyCaretHandleDragStarted()"
+        @drag-end="notifyCaretHandleDragEnded()"
+      />
+    </Teleport>
 
     <LinkActionOverlay
       v-if="!sourceModeActive"

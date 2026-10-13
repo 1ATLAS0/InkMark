@@ -15,7 +15,6 @@ import type { SelectionToolbarRows } from '../selectionToolbarSettings'
 import type { MobileCommandId } from '../../../lib/mobileCommands'
 import type { MobileToolbarCommandButton } from '../../../lib/mobileToolbarConfig'
 import ToolbarCommandGlyph from '../../../components/ToolbarCommandGlyph.vue'
-import MobileCaretHandle from './MobileCaretHandle.vue'
 import { useI18n, type I18nKey } from '../../../lib/i18n'
 
 const props = defineProps<{
@@ -32,7 +31,6 @@ const emit = defineEmits<{
   runCommand: [commandId: SelectionToolbarCommandId, restoreRange: Range | null]
   runCustomCommand: [commandId: MobileCommandId, restoreRange: Range | null]
   dismissSelection: [caretRange: Range | null]
-  moveCaret: [range: Range]
 }>()
 
 const { t } = useI18n()
@@ -48,16 +46,6 @@ const canWrite = ref(true)
 const left = ref(0)
 const top = ref(0)
 const placement = ref<'above' | 'below'>('above')
-// The collapsed caret the app's own drag handle follows, in viewport
-// coordinates; set only while a caret session's toolbar is visible.
-const caretHandleRect = ref<{ left: number, top: number, right: number, bottom: number } | null>(null)
-// Moving the caret ends the caret session by design, so a drag of the app's own
-// handle outlives the session that started it: the handle stays mounted until
-// the finger lifts, then disappears with the session it belonged to.
-const caretHandleDragging = ref(false)
-const caretHandleVisible = computed(
-  () => caretHandleDragging.value || (visible.value && props.caretSession && !hasSelection.value),
-)
 const toolbarElement = ref<HTMLElement | null>(null)
 // touchstart's default is prevented on the container, so :active never
 // applies on touch; this drives the pressed style instead. Custom command
@@ -233,19 +221,10 @@ function updateFromSelection() {
 
   if (!nextVisible || !snapshot?.rect) {
     visible.value = false
-    caretHandleRect.value = null
     return
   }
 
   hasSelection.value = !snapshot.collapsed
-  caretHandleRect.value = snapshot.collapsed
-    ? {
-        left: snapshot.rect.left,
-        top: snapshot.rect.top,
-        right: snapshot.rect.right,
-        bottom: snapshot.rect.bottom,
-      }
-    : null
   canWrite.value = readEditorEditability()
   pageCapacity.value = computeSelectionToolbarPageCapacity(window.innerWidth)
 
@@ -274,49 +253,6 @@ function updateFromSelection() {
     void nextTick(scheduleUpdate)
   }
 }
-
-// The WebView draws its own insertion handle — a bordered box with an inner
-// caret glyph — in a compositor layer above all DOM content, so no markup can
-// cover or restyle it. Chromium only shows that handle for gesture-made
-// selections: re-applying the same selection programmatically removes it while
-// the caret, the focus and the soft keyboard all stay put (the same trick the
-// toolbar already uses when the group menu would be covered). The app's own
-// handle then takes its place for the caret session.
-function hideNativeInsertionHandle() {
-  const active = document.activeElement
-  if (!active || !props.host?.contains(active)) {
-    return
-  }
-
-  const selection = document.getSelection()
-  if (!selection || selection.rangeCount !== 1 || !selection.isCollapsed) {
-    return
-  }
-
-  const range = selection.getRangeAt(0)
-  if (!props.host.contains(range.startContainer)) {
-    return
-  }
-
-  const clone = range.cloneRange()
-  selection.removeAllRanges()
-  selection.addRange(clone)
-}
-
-watch(
-  () => props.caretSession,
-  session => {
-    if (!session) {
-      return
-    }
-
-    hideNativeInsertionHandle()
-    // The WebView's own handle may be created a frame after the long-press
-    // signal that opened this session, so the re-apply runs once more after
-    // that frame; both calls are idempotent.
-    requestAnimationFrame(() => hideNativeInsertionHandle())
-  },
-)
 
 function runCommand(commandId: SelectionToolbarCommandId) {
   if (!props.editorReady) {
@@ -507,17 +443,13 @@ watch(
 </script>
 
 <template>
-  <!-- The wrapper keeps the teleported caret handle mounted while a drag
-       outlives the caret session that started it; the bar itself still mounts
-       only while visible. -->
-  <div v-if="visible || caretHandleDragging">
-    <!-- touchstart is prevented so the Android tap gesture can never collapse
-         the native text selection; mousedown is prevented so pointer/mouse
-         activation never moves focus off the selection either. -->
-    <div
-      v-if="visible"
-      ref="toolbarElement"
-      class="mobile-selection-toolbar"
+  <!-- touchstart is prevented so the Android tap gesture can never collapse
+       the native text selection; mousedown is prevented so pointer/mouse
+       activation never moves focus off the selection either. -->
+  <div
+    v-if="visible"
+    ref="toolbarElement"
+    class="mobile-selection-toolbar"
     :class="[`is-${placement}`, { 'is-two-row': customRows === 2 && showCustomCommands }]"
     :style="{ left: `${left}px`, top: `${top}px` }"
     role="toolbar"
@@ -667,19 +599,6 @@ watch(
     >
       {{ t('editor.selection.pageStatus', { current: customPage + 1, total: totalPages }) }}
     </span>
-    </div>
-
-    <!-- Teleported to the body: the toolbar animates a transform on mount, and
-         a transformed ancestor would both trap and offset a fixed child. -->
-    <Teleport to="body">
-      <MobileCaretHandle
-        v-if="caretHandleVisible"
-        :caret-rect="caretHandleRect"
-        @move-caret="range => emit('moveCaret', range)"
-        @drag-start="caretHandleDragging = true"
-        @drag-end="caretHandleDragging = false"
-      />
-    </Teleport>
   </div>
 </template>
 
