@@ -1087,25 +1087,75 @@ function insertMarkdownAtPendingSelection(markdown: string) {
   return insertTextAtRestoredSelection(markdown, pendingInlineInsertRange)
 }
 
-// Dragging the app's caret handle moves the insertion point: the DOM caret
-// under the pointer becomes the editor's caret (Muya's model synced with it),
-// which keeps the keyboard up and leaves no gesture-made selection for the
-// WebView to attach its own handle to.
+// The editor's own DOM node, not the host slot: the slot ref can already be
+// detached while the engine keeps rendering into the live node (the same reason
+// the selection lifecycle resolves the node from the instance).
+function resolveEditorRoot() {
+  return getEditor()?.domNode ?? getEditorElement()
+}
+
+// Dragging the caret capsule moves the insertion point: the DOM caret under the
+// capsule becomes the editor's caret (Muya's model synced with it), which keeps
+// the keyboard up and leaves no gesture-made selection for the WebView to
+// attach its own handle to.
 function moveEditorCaretFromHandle(range: Range) {
   const activeEditor = getEditor()
-  if (!activeEditor || !range.collapsed) {
-    return
-  }
-
-  // The editor's own DOM node, not the host slot: the slot ref can already be
-  // detached while the engine keeps rendering into the live node (the same
-  // reason the selection lifecycle resolves the node from the instance).
-  const editorRoot = activeEditor.domNode ?? getEditorElement()
-  if (!editorRoot?.contains(range.startContainer)) {
+  const editorRoot = resolveEditorRoot()
+  if (
+    !activeEditor
+    || !editorRoot
+    || !range.collapsed
+    || !editorRoot.contains(range.startContainer)
+  ) {
     return
   }
 
   restoreEditorInsertionCaret(activeEditor, range)
+}
+
+// Dragging a selection-edge capsule moves that edge: the opposite edge stays
+// put and anchors the rebuilt range. Collapsing onto the anchor hands the
+// caret path the same job, so a full drag in either direction stays smooth.
+function extendEditorSelectionFromHandle(
+  role: 'selection-start' | 'selection-end',
+  target: Range,
+) {
+  const activeEditor = getEditor()
+  const editorRoot = resolveEditorRoot()
+  if (
+    !activeEditor
+    || !editorRoot
+    || !target.collapsed
+    || !editorRoot.contains(target.startContainer)
+  ) {
+    return
+  }
+
+  const selection = document.getSelection()
+  if (!selection || selection.rangeCount === 0) {
+    return
+  }
+
+  const live = selection.getRangeAt(0)
+  const next = document.createRange()
+  try {
+    if (role === 'selection-end') {
+      next.setStart(live.startContainer, live.startOffset)
+      next.setEnd(target.startContainer, target.startOffset)
+    } else {
+      next.setStart(target.startContainer, target.startOffset)
+      next.setEnd(live.endContainer, live.endOffset)
+    }
+  } catch {
+    return
+  }
+
+  if (next.collapsed) {
+    restoreEditorInsertionCaret(activeEditor, next)
+    return
+  }
+
+  restoreEditorSelectionRange(activeEditor, next)
 }
 
 function openLinkSheet(restoreRange: Range | null = null) {
@@ -3010,6 +3060,7 @@ onBeforeUnmount(() => {
     @run-selection-command="runEditorSelectionCommand"
     @dismiss-selection="finishSelectionToolbarOutsideTap"
     @move-caret="moveEditorCaretFromHandle"
+    @extend-selection="extendEditorSelectionFromHandle"
     @open-link="openEditorLink"
     @toggle-toolbar="toggleEditorToolbarExclusive"
     @set-toolbar-panel="setEditorToolbarPanel"

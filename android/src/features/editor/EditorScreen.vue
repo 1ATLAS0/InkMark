@@ -11,11 +11,11 @@ import LocalDraftExitPrompt from './components/LocalDraftExitPrompt.vue'
 import IncomingOpenPrompt from './components/IncomingOpenPrompt.vue'
 import MobileEditorToolbar from './components/MobileEditorToolbar.vue'
 import MobileSelectionToolbar from './components/MobileSelectionToolbar.vue'
-import MobileCaretHandle from './components/MobileCaretHandle.vue'
+import MobileTextHandle from './components/MobileTextHandle.vue'
 import LinkActionOverlay from './components/LinkActionOverlay.vue'
 import ResumeCard from './components/ResumeCard.vue'
 import EditorFailurePanel from './components/EditorFailurePanel.vue'
-import { createEditorCaretHandle } from './editorCaretHandle'
+import { createEditorSelectionHandles } from './editorSelectionHandles'
 import { createLogger } from '../../lib/logger'
 import type { SelectionToolbarCommandId } from './selectionToolbar'
 import type { TableCommandId } from './tableCommands'
@@ -123,6 +123,7 @@ const emit = defineEmits<{
   'run-selection-command': [commandId: SelectionToolbarCommandId, restoreRange: Range | null]
   'dismiss-selection': [caretRange: Range | null]
   'move-caret': [range: Range]
+  'extend-selection': [role: 'selection-start' | 'selection-end', target: Range]
   'open-link': [href: string]
   'toggle-toolbar': []
   'set-toolbar-panel': [panel: MobileEditorToolbarPanel]
@@ -217,20 +218,18 @@ const selectionToolbarSuspended = computed(
     props.incomingOpenPromptOpen,
 )
 
-// The app's own caret handle takes the place of the WebView's insertion
-// handle after any gesture that leaves a collapsed caret in the editor — a
-// plain tap as much as a long-press. It is independent of the selection
-// toolbar (which serves selections and caret sessions): the handle simply
-// follows the caret, the way the native handle does.
+// The app's own capsules take the place of the WebView's text handles: one
+// under the caret any gesture leaves behind, two at the edges of a selection.
+// Independent of the selection toolbar (which serves selections and caret
+// sessions) — the capsules simply track the caret and the selection edges, the
+// way the native handles do.
 const {
-  rect: caretHandleRect,
-  visible: caretHandleVisible,
-  dragging: caretHandleDragging,
-  notifyDragStarted: notifyCaretHandleDragStarted,
-  notifyDragEnded: notifyCaretHandleDragEnded,
-  refresh: refreshCaretHandle,
-  teardown: teardownCaretHandle,
-} = createEditorCaretHandle({
+  handles: editorHandles,
+  notifyDragStarted: notifyEditorHandleDragStarted,
+  notifyDragEnded: notifyEditorHandleDragEnded,
+  refresh: refreshEditorHandles,
+  teardown: teardownEditorHandles,
+} = createEditorSelectionHandles({
   isEditorReady: () => props.editorReady,
   // Sheets, prompts, the menu and source mode own the interaction surface.
   canActivate: () => !selectionToolbarSuspended.value && !props.sourceModeActive,
@@ -240,13 +239,13 @@ const {
   logger: createLogger('editor'),
 })
 
-// A competing surface taking over the interaction must put the handle away
+// A competing surface taking over the interaction must put the capsules away
 // deterministically — the same reason the selection toolbar watches its
 // suspended prop. Source mode replaces the WYSIWYG surface entirely, and a
-// re-initializing editor has no caret to follow yet.
+// re-initializing editor has no caret or selection to follow yet.
 watch(
   () => [selectionToolbarSuspended.value, props.sourceModeActive, props.editorReady] as const,
-  () => refreshCaretHandle(),
+  () => refreshEditorHandles(),
 )
 const linkInsertDispatching = ref(false)
 const linkInsertSheet = ref<InstanceType<typeof LinkInsertSheet> | null>(null)
@@ -382,7 +381,7 @@ watch(
 watch(editorHost, element => emit('editor-host-change', element), { immediate: true })
 
 onBeforeUnmount(() => {
-  teardownCaretHandle()
+  teardownEditorHandles()
   emit('editor-host-change', null)
 })
 </script>
@@ -673,17 +672,22 @@ onBeforeUnmount(() => {
       @dismiss-selection="caretRange => emit('dismiss-selection', caretRange)"
     />
 
-    <!-- The app's own caret handle: teleported to the body so no transformed
-         ancestor can trap or offset a fixed child. Shown for any gesture that
-         leaves a collapsed caret in the editor; the drag keeps it mounted even
-         if the caret it followed is gone by the time the finger lifts. -->
+    <!-- The app's own text handles: teleported to the body so no transformed
+         ancestor can trap or offset a fixed child. One capsule tracks a caret;
+         two track the edges of a selection. A drag keeps the set mounted even
+         if the gesture it belongs to is gone by the time the finger lifts. -->
     <Teleport to="body">
-      <MobileCaretHandle
-        v-if="!sourceModeActive && (caretHandleVisible || caretHandleDragging)"
-        :caret-rect="caretHandleRect"
+      <MobileTextHandle
+        v-for="handle in sourceModeActive ? [] : editorHandles"
+        :key="handle.role"
+        :role="handle.role"
+        :caret-rect="handle.rect"
         @move-caret="range => emit('move-caret', range)"
-        @drag-start="notifyCaretHandleDragStarted()"
-        @drag-end="notifyCaretHandleDragEnded()"
+        @extend-selection="
+          (role, target) => emit('extend-selection', role, target)
+        "
+        @drag-start="notifyEditorHandleDragStarted()"
+        @drag-end="notifyEditorHandleDragEnded()"
       />
     </Teleport>
 

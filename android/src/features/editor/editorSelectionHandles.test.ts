@@ -1,7 +1,10 @@
 // @vitest-environment happy-dom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createEditorCaretHandle, type EditorCaretHandle } from './editorCaretHandle'
+import {
+  createEditorSelectionHandles,
+  type EditorSelectionHandles,
+} from './editorSelectionHandles'
 
 // A collapsed caret at x=16 on a 24px line, the way a real browser reports it:
 // zero width, real height. happy-dom performs no layout (every rect is zero),
@@ -11,7 +14,7 @@ import { createEditorCaretHandle, type EditorCaretHandle } from './editorCaretHa
 // same geometry.
 const CARET_RECT = {
   left: 16,
-  right: 16,
+  right: 40,
   top: 40,
   bottom: 64,
   width: 0,
@@ -34,7 +37,7 @@ afterEach(() => {
 })
 
 interface Harness {
-  handle: EditorCaretHandle
+  handle: EditorSelectionHandles
   host: HTMLElement
   editor: HTMLElement
   paragraph: HTMLElement
@@ -55,7 +58,7 @@ function buildHarness(): Harness {
 
   let activatable = true
   const logger = { debug: vi.fn() }
-  const handle = createEditorCaretHandle({
+  const handle = createEditorSelectionHandles({
     isEditorReady: () => true,
     getEditorHost: () => host,
     canActivate: () => activatable,
@@ -150,15 +153,20 @@ describe('createEditorCaretHandle', () => {
     fireTouchEnd(harness.paragraph)
 
     await vi.waitFor(() => expect(harness.handle.visible.value).toBe(true))
-    expect(harness.handle.rect.value).toEqual({
-      left: CARET_RECT.left,
-      top: CARET_RECT.top,
-      right: CARET_RECT.right,
-      bottom: CARET_RECT.bottom,
-    })
+    expect(harness.handle.handles.value).toEqual([
+      {
+        role: 'caret',
+        rect: {
+          left: CARET_RECT.left,
+          top: CARET_RECT.top,
+          right: CARET_RECT.right,
+          bottom: CARET_RECT.bottom,
+        },
+      },
+    ])
     expect(harness.logger.debug).toHaveBeenCalledWith(
-      'editor caret handle shown',
-      expect.objectContaining({ left: CARET_RECT.left, top: CARET_RECT.top }),
+      'editor handles shown',
+      expect.objectContaining({ roles: 'caret' }),
     )
   })
 
@@ -198,18 +206,6 @@ describe('createEditorCaretHandle', () => {
     expect(harness.handle.visible.value).toBe(false)
   })
 
-  it('hides when the caret widens into a selection', async () => {
-    const harness = buildHarness()
-    focusEditor(harness)
-    fireTouchEnd(harness.paragraph)
-    await vi.waitFor(() => expect(harness.handle.visible.value).toBe(true))
-
-    widenSelection(harness.paragraph)
-
-    expect(harness.handle.visible.value).toBe(false)
-    expect(harness.handle.rect.value).toBeNull()
-  })
-
   it('hides when typing starts', async () => {
     const harness = buildHarness()
     focusEditor(harness)
@@ -219,8 +215,8 @@ describe('createEditorCaretHandle', () => {
     fireKeydown()
 
     expect(harness.handle.visible.value).toBe(false)
-    expect(harness.handle.rect.value).toBeNull()
-    expect(harness.logger.debug).toHaveBeenCalledWith('editor caret handle hidden', {
+    expect(harness.handle.handles.value).toEqual([])
+    expect(harness.logger.debug).toHaveBeenCalledWith('editor handles hidden', {
       reason: 'typing',
     })
   })
@@ -274,7 +270,7 @@ describe('createEditorCaretHandle', () => {
     fireScroll()
 
     await vi.waitFor(() =>
-      expect(harness.handle.rect.value).toEqual({
+      expect(harness.handle.handles.value[0]?.rect).toEqual({
         left: CARET_RECT.left,
         top: CARET_RECT.top,
         right: CARET_RECT.right,
@@ -300,6 +296,57 @@ describe('createEditorCaretHandle', () => {
     harness.handle.notifyDragEnded()
     expect(harness.handle.dragging.value).toBe(false)
     expect(harness.handle.visible.value).toBe(true)
+  })
+
+  it('shows one capsule per selection edge, at the edge it points at', async () => {
+    const harness = buildHarness()
+    focusEditor(harness)
+    fireTouchEnd(harness.paragraph)
+    await vi.waitFor(() => expect(harness.handle.visible.value).toBe(true))
+
+    widenSelection(harness.paragraph)
+
+    expect(harness.handle.handles.value).toEqual([
+      {
+        role: 'selection-start',
+        rect: {
+          left: CARET_RECT.left,
+          top: CARET_RECT.top,
+          right: CARET_RECT.left,
+          bottom: CARET_RECT.bottom,
+        },
+      },
+      {
+        role: 'selection-end',
+        rect: {
+          left: CARET_RECT.right,
+          top: CARET_RECT.top,
+          right: CARET_RECT.right,
+          bottom: CARET_RECT.bottom,
+        },
+      },
+    ])
+  })
+
+  it('keeps the capsules mounted while a drag collapses the selection', async () => {
+    const harness = buildHarness()
+    focusEditor(harness)
+    fireTouchEnd(harness.paragraph)
+    await vi.waitFor(() => expect(harness.handle.visible.value).toBe(true))
+    widenSelection(harness.paragraph)
+    expect(harness.handle.handles.value).toHaveLength(2)
+
+    harness.handle.notifyDragStarted()
+    // The drag runs the selection back to a caret; the capsules the finger is
+    // holding must not vanish mid-gesture.
+    placeCaret(harness.paragraph, 3)
+    fireSelectionChange()
+
+    expect(harness.handle.handles.value).toHaveLength(2)
+    expect(harness.handle.dragging.value).toBe(true)
+
+    harness.handle.notifyDragEnded()
+    expect(harness.handle.handles.value.map(handle => handle.role)).toEqual(['caret'])
   })
 
   it('stops listening once torn down', async () => {
