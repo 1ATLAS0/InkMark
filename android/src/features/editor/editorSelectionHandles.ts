@@ -213,6 +213,21 @@ export function createEditorSelectionHandles(
     })
   }
 
+  // What the WebView still paints a frame (or a busy main thread) after a
+  // re-apply: one more pass, at most one pending at a time, so a burst of
+  // selection updates cannot stack timers.
+  function scheduleLateHidePass() {
+    if (settleTimer !== null) {
+      return
+    }
+
+    settleTimer = window.setTimeout(() => {
+      settleTimer = null
+      hideNativeGestureHandles()
+      refresh()
+    }, NATIVE_HANDLE_SETTLE_MS)
+  }
+
   // Safety net for what the WebView still paints a frame after the synchronous
   // re-apply: one pass shortly after the gesture, one more on the next frame.
   function handleGestureSettled() {
@@ -257,10 +272,11 @@ export function createEditorSelectionHandles(
 
     gestureInProgress = false
     // Synchronously first: the handle the gesture just created must not get a
-    // frame on screen, and the settle pass below only catches what the WebView
-    // paints a frame late.
+    // frame on screen; the passes below only catch what the WebView paints a
+    // frame late.
     hideNativeGestureHandles()
     refresh()
+    scheduleLateHidePass()
     handleGestureSettled()
   }
 
@@ -320,9 +336,11 @@ export function createEditorSelectionHandles(
 
     if (gestureInProgress) {
       // The running gesture has just produced its selection: replace the
-      // WebView's handle before it is painted, and publish the capsules.
+      // WebView's handle before it is painted, and publish the capsules. A
+      // late pass covers a handle the busy main thread paints afterwards.
       hideNativeGestureHandles()
       refresh()
+      scheduleLateHidePass()
       return
     }
 
