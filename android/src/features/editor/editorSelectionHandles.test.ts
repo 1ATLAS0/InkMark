@@ -108,6 +108,10 @@ function widenSelection(node: Node) {
 // happy-dom dispatches neither touch nor pointer events from user gestures;
 // the composable only reads pointerType and changedTouches, so plain events
 // carrying those properties exercise the same code paths.
+function fireTouchStart(target: EventTarget) {
+  target.dispatchEvent(new Event('touchstart', { bubbles: true, cancelable: true }))
+}
+
 function fireTouchEnd(target: EventTarget) {
   const event = new Event('touchend', { bubbles: true, cancelable: true })
   Object.defineProperty(event, 'changedTouches', { value: [{}] })
@@ -347,6 +351,26 @@ describe('createEditorCaretHandle', () => {
 
     harness.handle.notifyDragEnded()
     expect(harness.handle.handles.value.map(handle => handle.role)).toEqual(['caret'])
+  })
+
+  it('re-applies the selection while the gesture is still running', async () => {
+    const harness = buildHarness()
+    focusEditor(harness)
+    // The selection a long-press makes exists while the finger is still down;
+    // the WebView paints its handle right then, so the replacement has to
+    // happen mid-gesture rather than on release.
+    widenSelection(harness.paragraph)
+    const selection = document.getSelection()!
+    const removeSpy = vi.spyOn(selection, 'removeAllRanges')
+
+    fireTouchStart(harness.paragraph)
+    fireSelectionChange()
+
+    expect(removeSpy).toHaveBeenCalledTimes(1)
+    expect(harness.handle.handles.value.map(handle => handle.role)).toEqual([
+      'selection-start',
+      'selection-end',
+    ])
   })
 
   it('stops listening once torn down', async () => {

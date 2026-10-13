@@ -49,7 +49,7 @@ export interface EditorSelectionHandles {
 // drop those handles while the selection, the focus and the keyboard stay
 // exactly as they are, which is the mechanism this layer uses before showing
 // the app's own capsules in their place.
-const NATIVE_HANDLE_SETTLE_MS = 60
+const NATIVE_HANDLE_SETTLE_MS = 16
 
 export function createEditorSelectionHandles(
   options: CreateEditorSelectionHandlesOptions,
@@ -60,8 +60,21 @@ export function createEditorSelectionHandles(
 
   let settleTimer: number | null = null
   let measureFrame: number | null = null
+  // True from the moment a touch/drag begins inside the editor until it ends.
+  // The WebView paints its own handles as soon as the gesture has produced a
+  // selection — mid-long-press, before the finger is anywhere near lifting — so
+  // the re-apply that removes them has to run during the gesture, not after it.
+  let gestureInProgress = false
+  // Browsers queue `selectionchange`, but an engine that dispatches it inside
+  // removeAllRanges() would otherwise recurse: the re-apply triggers the very
+  // listener that asked for it.
+  let reapplyingSelection = false
 
   function hideNativeGestureHandles() {
+    if (reapplyingSelection) {
+      return
+    }
+
     const host = options.getEditorHost()
     const active = document.activeElement
     if (!host || !active || !host.contains(active)) {
@@ -79,8 +92,13 @@ export function createEditorSelectionHandles(
     }
 
     const clone = range.cloneRange()
-    selection.removeAllRanges()
-    selection.addRange(clone)
+    reapplyingSelection = true
+    try {
+      selection.removeAllRanges()
+      selection.addRange(clone)
+    } finally {
+      reapplyingSelection = false
+    }
   }
 
   // The capsule for one edge of a range: a collapsed range at the edge reports
@@ -195,9 +213,8 @@ export function createEditorSelectionHandles(
     })
   }
 
-  // The native handles are created from the gesture that made the selection or
-  // placed the caret, a frame or two after that state exists: hide them once it
-  // has settled, then publish the app's own capsules.
+  // Safety net for what the WebView still paints a frame after the synchronous
+  // re-apply: one pass shortly after the gesture, one more on the next frame.
   function handleGestureSettled() {
     if (settleTimer !== null) {
       window.clearTimeout(settleTimer)
@@ -221,21 +238,47 @@ export function createEditorSelectionHandles(
     return Boolean(host && target instanceof Node && host.contains(target))
   }
 
-  function onDocumentTouchEnd(event: TouchEvent) {
-    const touch = event.changedTouches[0]
-    if (!touch || !isInsideEditorTarget(event.target)) {
+  function onDocumentTouchStart(event: TouchEvent) {
+    if (isInsideEditorTarget(event.target)) {
+      gestureInProgress = true
+    }
+  }
+
+  function onDocumentPointerDown(event: PointerEvent) {
+    if (event.pointerType !== 'mouse' && isInsideEditorTarget(event.target)) {
+      gestureInProgress = true
+    }
+  }
+
+  function finishGesture(event: Event) {
+    if (!isInsideEditorTarget(event.target)) {
       return
     }
 
+    gestureInProgress = false
+    // Synchronously first: the handle the gesture just created must not get a
+    // frame on screen, and the settle pass below only catches what the WebView
+    // paints a frame late.
+    hideNativeGestureHandles()
+    refresh()
     handleGestureSettled()
   }
 
-  function onDocumentPointerUp(event: PointerEvent) {
-    if (event.pointerType === 'mouse' || !isInsideEditorTarget(event.target)) {
+  function onDocumentTouchEnd(event: TouchEvent) {
+    const touch = event.changedTouches[0]
+    if (!touch) {
       return
     }
 
-    handleGestureSettled()
+    finishGesture(event)
+  }
+
+  function onDocumentPointerUp(event: PointerEvent) {
+    if (event.pointerType === 'mouse') {
+      return
+    }
+
+    finishGesture(event)
   }
 
   // Web dev and e2e have no touch: Chromium fires contextmenu for long-press
@@ -275,6 +318,14 @@ export function createEditorSelectionHandles(
       return
     }
 
+    if (gestureInProgress) {
+      // The running gesture has just produced its selection: replace the
+      // WebView's handle before it is painted, and publish the capsules.
+      hideNativeGestureHandles()
+      refresh()
+      return
+    }
+
     if (handles.value.length === 0) {
       return
     }
@@ -293,6 +344,8 @@ export function createEditorSelectionHandles(
     }
   }
 
+  document.addEventListener('touchstart', onDocumentTouchStart, true)
+  document.addEventListener('pointerdown', onDocumentPointerDown, true)
   document.addEventListener('touchend', onDocumentTouchEnd, true)
   document.addEventListener('pointerup', onDocumentPointerUp, true)
   document.addEventListener('contextmenu', onDocumentContextMenu)
@@ -322,6 +375,8 @@ export function createEditorSelectionHandles(
         cancelAnimationFrame(measureFrame)
         measureFrame = null
       }
+      document.removeEventListener('touchstart', onDocumentTouchStart, true)
+      document.removeEventListener('pointerdown', onDocumentPointerDown, true)
       document.removeEventListener('touchend', onDocumentTouchEnd, true)
       document.removeEventListener('pointerup', onDocumentPointerUp, true)
       document.removeEventListener('contextmenu', onDocumentContextMenu)
