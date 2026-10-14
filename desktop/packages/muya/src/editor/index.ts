@@ -398,6 +398,14 @@ export class Editor {
 
     updateContents(operations: JSONOp, selection: Nullable<IHistorySelection>, source: string) {
         const muya = this._muya;
+        // The viewport-bounded mount keeps only a prefix of the document in
+        // the live tree, but the walkers below resolve op paths against it.
+        // Materialise every top-level block the operation touches BEFORE the
+        // state changes — mounting after dispatch would build the target from
+        // the updated state and then apply the op to it a second time.
+        if (operations !== null && this.scrollPage)
+            this.scrollPage.ensureMountedForOperation(operations);
+
         // ot-json1 no-op (`null`) is forwarded to dispatch — JSONState
         // short-circuits internally so listeners still see a json-change
         // event for the no-op.
@@ -408,9 +416,18 @@ export class Editor {
             return;
 
         try {
-            const snapshot = pick(this.scrollPage as BlockNode, operations);
+            // No on-demand mounting while the walkers run: the state is
+            // already post-dispatch, so a mount triggered from inside the walk
+            // would materialise nodes the walker is about to insert itself.
+            this.scrollPage!.suspendOnDemandMount();
+            try {
+                const snapshot = pick(this.scrollPage as BlockNode, operations);
 
-            drop(snapshot, operations, muya);
+                drop(snapshot, operations, muya);
+            }
+            finally {
+                this.scrollPage!.resumeOnDemandMount();
+            }
 
             this._restoreSelection(selection);
         }

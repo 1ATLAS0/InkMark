@@ -219,6 +219,27 @@ export class Muya {
         this.eventCenter.once(event, listener);
     }
 
+    /**
+     * Materialise every top-level block up to `index`, synchronously. The
+     * viewport-bounded mount keeps a prefix of the document in the DOM;
+     * consumers that must reach a specific block (outline jump, path lookup)
+     * mount through it first instead of flushing the whole remainder.
+     */
+    ensureMountedThrough(index: number) {
+        this.editor.scrollPage?.ensureMountedThrough(index);
+    }
+
+    /**
+     * Fill the rest of the document in the usual background chunks. For
+     * consumers whose result must cover every block — the search walks block
+     * text — because a viewport-bounded prefix would silently miss matches.
+     * Pair with the `muya-mount-progress` / `muya-mount-complete` events to
+     * re-run the query as blocks arrive.
+     */
+    mountAllInBackground() {
+        this.editor.scrollPage?.mountAllInBackground();
+    }
+
     getState() {
         return this.editor.jsonState.getState();
     }
@@ -1680,6 +1701,10 @@ export class Muya {
     }
 
     destroy() {
+        // Stop any in-flight chunked mount first: its timer must never run
+        // against a torn-down instance (the capture-phase scroll listener also
+        // goes away with it).
+        this.editor.scrollPage?.cancelPendingMount();
         this.eventCenter.detachAllDomEvents();
         this.eventCenter.unsubscribeAll();
         // this.domNode[BLOCK_DOM_PROPERTY] = null;

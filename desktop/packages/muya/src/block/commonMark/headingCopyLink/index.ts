@@ -1,4 +1,5 @@
 import type { Muya } from '../../../muya';
+import type Parent from '../../base/parent';
 import formatLinkIcon from '../../../assets/icons/format_link/2.png';
 import { CLASS_NAMES } from '../../../config';
 import { stableSlug } from '../../../state/getTOC';
@@ -101,8 +102,26 @@ class HeadingCopyLink extends TreeNode {
             return;
 
         this.muya.eventCenter.emit('heading-copy-link', {
-            key: stableSlug(heading),
+            key: this._tocSlug(heading),
         });
+    }
+
+    // The TOC slugs STATE objects (it enumerates the state, not the mounted
+    // tree, which may hold only a prefix), so resolve the heading's top-level
+    // state by index to hand out the same slug `getTOC()` reports. Headings
+    // nested in other blocks are not in the TOC at all; a fresh slug for them
+    // preserves the previous copy behaviour.
+    private _tocSlug(heading: Parent): string {
+        const { scrollPage, jsonState } = this.muya.editor;
+        if (scrollPage) {
+            const index = scrollPage.children.offset(heading);
+            if (index >= 0) {
+                const state = jsonState.peekState()[index];
+                if (state)
+                    return stableSlug(state);
+            }
+        }
+        return stableSlug(heading);
     }
 
     private _detachDOMEvents() {

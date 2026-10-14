@@ -17,6 +17,8 @@ export default [
       '.claude/**',
       '**/out/**',
       '**/dist/**',
+      // Scratch packaging output (used when the normal dist/ is locked).
+      'dist-pack/**',
       // The website ships with its own ESLint v8 config (React conventions).
       // The root config here is desktop-focused; mixing the two surfaces
       // pre-existing website style errors into desktop CI.

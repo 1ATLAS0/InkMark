@@ -41,6 +41,8 @@ interface TocItem extends ListItem {
   githubSlug?: string
   content?: string
   lvl: number | null
+  /** Top-level state index of the heading, used to materialise the block before scrolling to it. */
+  index?: number
 }
 
 type TocTreeNode = TreeNode<TocItem>

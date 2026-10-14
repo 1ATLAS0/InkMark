@@ -1112,9 +1112,23 @@ const toSearchMatches = (result: unknown) => {
   }
 }
 
+// Last executed query, so the background fill can re-run it as blocks arrive.
+let lastSearchQuery: { value: string; opt?: ISearchOption } | null = null
+
+const rerunSearchForFill = () => {
+  if (!editor.value || !lastSearchQuery) return
+  editorStore.SEARCH(toSearchMatches(editor.value.search(lastSearchQuery.value, lastSearchQuery.opt)))
+}
+
 const handleSearch = (payload: unknown) => {
   if (!editor.value) return
   const { value, opt } = payload as { value: string; opt?: ISearchOption }
+  lastSearchQuery = value ? { value, opt } : null
+  // The engine mounts blocks only as the reader scrolls; a search must cover
+  // every block. Opt back into the whole-document background fill — the query
+  // re-runs on `muya-mount-progress` so the count settles instead of silently
+  // missing matches below the mounted prefix.
+  if (value) editor.value.mountAllInBackground()
   editorStore.SEARCH(toSearchMatches(editor.value.search(value, opt)))
   scrollToHighlight()
 }
@@ -1249,6 +1263,12 @@ const scrollToHighlight = () => {
 const scrollToHeader = (slug: unknown) => {
   const container = getScrollContainer()
   if (!container) return
+  const item = editorStore.listToc.find((entry) => entry.slug === slug)
+  if (!item) return
+  // The heading's block may sit below the mounted prefix (viewport-bounded
+  // mount); materialise through its top-level index first, or the DOM lookup
+  // below silently finds nothing.
+  if (typeof item.index === 'number') editor.value?.ensureMountedThrough(item.index)
   const heading = resolveTocHeadingElement(container, editorStore.listToc, slug)
   if (!heading) return
   animatedScrollTo(container, getTocHeadingScrollTop(container, heading), 300)
@@ -1812,6 +1832,8 @@ onMounted(() => {
   // the document tree and instantiates the registered UI plugins).
   muya.init()
   editor.value = muya
+  // A fresh document starts with no search to re-run during its mount fill.
+  lastSearchQuery = null
   // The first document's content is set via constructor options, so no
   // `file-loaded` / `setMarkdownToEditor` runs for it — seed its TOC here.
   editorStore.UPDATE_TOC(muya.getTOC())
@@ -1921,6 +1943,14 @@ onMounted(() => {
   // clipboard (resolved via `listToc.find(i => i.slug === key)`).
   editor.value.on('heading-copy-link', ({ key }: { key: string }) => {
     editorStore.copyGithubSlug(key)
+  })
+
+  // The viewport-bounded mount materialises blocks over time; as more arrive,
+  // re-run the pending search query (so its count settles over the whole
+  // document) and re-pair TOC entries with the newly mounted heading elements.
+  editor.value.on('muya-mount-progress', () => {
+    rerunSearchForFill()
+    nextTick(rebuildHeadingCache)
   })
 
   editor.value.on(

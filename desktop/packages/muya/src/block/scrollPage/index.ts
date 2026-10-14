@@ -1,3 +1,4 @@
+import type { JSONOpList } from 'ot-json1';
 import type { Muya } from '../../muya';
 import type { TState } from '../../state/types';
 import type { Nullable } from '../../types';
@@ -5,7 +6,7 @@ import type Content from '../base/content';
 import type TreeNode from '../base/treeNode';
 import type { IConstructor, TBlockPath } from '../types';
 import { BLOCK_DOM_PROPERTY } from '../../config';
-import { isHTMLElement, isMouseEvent } from '../../utils';
+import { deepClone, isHTMLElement, isMouseEvent } from '../../utils';
 import logger from '../../utils/logger';
 import Parent from '../base/parent';
 
@@ -14,6 +15,31 @@ const debug = logger('scrollpage:');
 interface IBlurFocus {
     blur: Nullable<Content>;
     focus: Nullable<Content>;
+}
+
+// Recursive node count of a state subtree — the unit of mount budgeting.
+function stateWeight(state: TState): number {
+    let weight = 1;
+    if ('children' in state && Array.isArray(state.children)) {
+        for (const child of state.children as TState[])
+            weight += stateWeight(child);
+    }
+    return weight;
+}
+
+// End index (exclusive) after taking blocks from `from` until `budget`
+// weight is consumed. Always takes at least one block so progress is made
+// even when a single block exceeds the whole budget.
+function takeByWeight(state: TState[], from: number, budget: number): number {
+    let end = from;
+    let used = 0;
+    while (end < state.length) {
+        used += stateWeight(state[end]);
+        end += 1;
+        if (used >= budget)
+            break;
+    }
+    return end;
 }
 
 export class ScrollPage extends Parent {
@@ -51,16 +77,60 @@ export class ScrollPage extends Parent {
     static create(muya: Muya, state: TState[]) {
         const scrollPage = new ScrollPage(muya);
 
-        scrollPage.append(
-            ...state.map((block) => {
-                return this.loadBlock(block.name).create(muya, block);
-            }),
-        );
+        scrollPage._mountBlocks(state);
 
         scrollPage.parent!.domNode!.appendChild(scrollPage.domNode!);
 
         return scrollPage;
     }
+
+    // Chunked-mount tuning. The synchronous prefix is budgeted in STATE
+    // WEIGHT (the recursive node count of a top-level block, not block
+    // count — one list with thousands of items would blow a count budget)
+    // and comfortably overfills any viewport. Background chunks are budgeted
+    // by ELAPSED TIME so a scheduled task stays under half a frame on the
+    // machine actually running it. A single top-level block larger than
+    // either budget still mounts as one unit — blocks are atomic — which is
+    // the documented bound of this scheme.
+    private static readonly _initialMountWeight = 512;
+    private static readonly _chunkBudgetMs = 4;
+
+    // How far past the viewport the mounted prefix reaches. Building every
+    // block's DOM subtree up front is the dominant open cost on large
+    // documents: a 1 MB file measured ~41 s of rendering churn before the
+    // content settled, while the reader only ever saw a few screens. The
+    // prefix stops at the viewport plus this margin and resumes when
+    // scrolling approaches its edge; `mountAllInBackground()` restores the
+    // whole-document fill for consumers that genuinely need it (search).
+    private static readonly _readAheadViewports = 3;
+
+    // While the reader is scrolling the document, background chunks compete
+    // with input for the main thread: frames still render, but the surface
+    // feels late. Pause the chain for this long after the last interaction
+    // event and let it resume once the surface is quiet again.
+    private static readonly _interactionPauseMs = 200;
+
+    private _pendingMount: {
+        handle: ReturnType<typeof setTimeout> | null;
+    } | null = null;
+
+    // Timestamp until which background mounting stays paused (see _scheduleNextChunk).
+    private _interactionUntil = 0;
+
+    // See mountAllInBackground().
+    private _mountAllRequested = false;
+
+    // Top-level index the chunk chain may fill up to (see _refreshMountTarget).
+    private _mountTarget = 0;
+
+    // The reader may scroll the page, the editor container or any ancestor, and
+    // a scroll event does not bubble: a capture listener on the document is the
+    // only placement that sees all three. Attached only while a mount is
+    // pending, removed by cancelPendingMount (updateState / destroy).
+    private _viewportScrollHandler: (() => void) | null = null;
+
+    // See suspendOnDemandMount().
+    private _onDemandMountSuspended = false;
 
     override get path() {
         return [];
@@ -91,17 +161,332 @@ export class ScrollPage extends Parent {
         const { domNode } = this;
 
         eventCenter.attachDOMEvent(domNode!, 'click', this._clickHandler.bind(this));
+
+        // Scrolling means "the reader is interacting": defer the pending mount
+        // chain until the surface has been quiet for a moment, then refresh the
+        // target so the read-ahead keeps up with the reader without competing
+        // with the gesture that is driving it.
+        const markInteraction = () => {
+            this._interactionUntil = performance.now() + ScrollPage._interactionPauseMs;
+            if (this._pendingMount) {
+                this._refreshMountTarget();
+                this._scheduleNextChunk();
+            }
+        };
+        for (const eventName of ['wheel', 'scroll'] as const)
+            eventCenter.attachDOMEvent(domNode!, eventName, markInteraction);
     }
 
     updateState(state: TState[]) {
-        const { muya } = this;
+        this.cancelPendingMount();
         // Empty scrollPage dom
         this.empty();
+        this._mountBlocks(state);
+    }
+
+    // Building every block's DOM subtree up front is the dominant open cost on
+    // large documents: parse and state are linear, but a 1 MB file still means
+    // tens of thousands of block nodes constructed in one synchronous task.
+    // Mount an over-viewport prefix synchronously and append the rest in
+    // scheduled time-budgeted chunks, so the document is visible and editable
+    // at once.
+    //
+    // The pending tail is NOT a snapshot. Every chunk re-reads the live JSON
+    // state and resumes at the live child count; the invariant is that the
+    // mounted prefix always equals `state[0 .. children.length)`. Structural
+    // edits (Enter splits, paste, block removal) mutate the live tree and the
+    // state at the SAME index, so the invariant survives them with no
+    // flushing. Whole-tree consumers (queryBlock into the tail,
+    // lastContentInDescendant, search) mount what they need through
+    // `ensureMountedThrough` / `flushPendingMount`.
+    private _mountBlocks(state: TState[]) {
+        const initial = takeByWeight(state, 0, ScrollPage._initialMountWeight);
+        this._appendFromState(state, 0, initial);
+        // The chain may only fill the mounted prefix until the reader scrolls.
+        this._mountTarget = initial;
+        // A fresh document restarts the mount policy: a whole-document fill
+        // requested for the previous one (search) must not carry over.
+        this._mountAllRequested = false;
+
+        if (state.length > initial) {
+            this._pendingMount = { handle: null };
+            this._listenForViewportScroll();
+            this._scheduleNextChunk();
+        }
+    }
+
+    private _appendFromState(state: readonly TState[], from: number, to: number) {
+        // Blocks keep references into the state object they are built from
+        // (`this.meta = state.meta` and the like). The slice may come straight
+        // from the live JSON state, so clone it — a block mutating shared
+        // metadata would silently rewrite the state ahead of its op.
         this.append(
-            ...state.map((block) => {
-                return ScrollPage.loadBlock(block.name).create(muya, block);
+            ...deepClone(state.slice(from, to)).map((block) => {
+                return ScrollPage.loadBlock(block.name).create(this.muya, block);
             }),
         );
+    }
+
+    private _listenForViewportScroll() {
+        if (this._viewportScrollHandler)
+            return;
+
+        const handler = () => {
+            this._interactionUntil = performance.now() + ScrollPage._interactionPauseMs;
+            if (this._pendingMount) {
+                this._refreshMountTarget();
+                this._scheduleNextChunk();
+            }
+        };
+        document.addEventListener('scroll', handler, { capture: true, passive: true });
+        this._viewportScrollHandler = handler;
+    }
+
+    private _stopListeningForViewportScroll() {
+        if (!this._viewportScrollHandler)
+            return;
+
+        document.removeEventListener('scroll', this._viewportScrollHandler, { capture: true });
+        this._viewportScrollHandler = null;
+    }
+
+    /**
+     * Refresh the mount target from the live layout: everything the viewport
+     * plus the read-ahead margin can reach, and never less than one small step
+     * past what is already mounted (so scrolling into blank space keeps
+     * filling). Called from the scroll listener, where layout is settled —
+     * the chunk chain itself only compares counts.
+     */
+    private _refreshMountTarget() {
+        // Children live in a linked list; snapshot it once (pointer copies,
+        // no layout) so the search below can index it cheaply.
+        const mountedBlocks = [...this.children.iterator()] as (Parent | undefined)[];
+        const states = this.muya.editor.jsonState.peekState();
+        if (mountedBlocks.length >= states.length)
+            return;
+
+        const margin = window.innerHeight * (1 + ScrollPage._readAheadViewports);
+        let low = 0;
+        let high = mountedBlocks.length;
+        while (low < high) {
+            const mid = (low + high) >> 1;
+            const rect = mountedBlocks[mid]?.domNode?.getBoundingClientRect();
+            if (rect && rect.top <= margin)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+
+        // Blocks past the mounted end have no geometry to read, so the margin
+        // is translated into a block count with the average height so far —
+        // a fling then keeps its read-ahead instead of outrunning a fixed step.
+        const mounted = mountedBlocks[mountedBlocks.length - 1]?.domNode
+            ?.getBoundingClientRect();
+        const averageHeight = mounted && mountedBlocks.length > 0
+            ? Math.max(24, mounted.bottom / mountedBlocks.length)
+            : 96;
+        const marginBlocks = Math.ceil(margin / averageHeight);
+        this._mountTarget = Math.max(
+            this._mountTarget,
+            low + 1,
+            mountedBlocks.length + Math.max(8, marginBlocks),
+        );
+    }
+
+    /**
+     * Fill in the rest of the document in the usual background chunks. For
+     * consumers whose result must cover every block — the search walks block
+     * text — because a viewport-bounded prefix would silently miss matches.
+     */
+    mountAllInBackground() {
+        if (!this._pendingMount || this._mountAllRequested)
+            return;
+
+        this._mountAllRequested = true;
+        this._scheduleNextChunk();
+    }
+
+    private _scheduleNextChunk() {
+        if (!this._pendingMount)
+            return;
+
+        // Wait out any ongoing interaction before doing more background work.
+        const wait = Math.max(0, this._interactionUntil - performance.now());
+        // setTimeout keeps mounting while the tab is backgrounded (rAF stalls).
+        this._pendingMount.handle = setTimeout(() => {
+            this._mountNextChunk();
+        }, wait);
+    }
+
+    private _mountNextChunk() {
+        const pending = this._pendingMount;
+        if (!pending)
+            return;
+
+        // Edits mutate the live tree immediately but their ops reach the
+        // state on the next frame; drain them first so the live child count
+        // is a valid cursor into the state array.
+        this.muya.editor.jsonState.flush();
+
+        // Mount block by block until the task budget is spent — actual
+        // elapsed time, not a fixed weight, so one chunk never grows into a
+        // frame-blowing task on heavy content.
+        const states = this.muya.editor.jsonState.peekState();
+        const started = performance.now();
+        let next = this.children.length;
+        while (
+            next < states.length
+            && performance.now() - started < ScrollPage._chunkBudgetMs
+        ) {
+            this._appendFromState(states, next, next + 1);
+            next += 1;
+        }
+
+        if (next >= states.length) {
+            this._pendingMount = null;
+            this.muya.eventCenter.emit('muya-mount-complete', { total: states.length });
+        }
+        else {
+            this.muya.eventCenter.emit('muya-mount-progress', {
+                mounted: next,
+                total: states.length,
+            });
+            // Stop at the viewport edge instead of racing to the end: the
+            // scroll listener moves the target as the reader moves on, and
+            // mountAllInBackground() asks for the whole document.
+            if (this._mountAllRequested || next < this._mountTarget)
+                this._scheduleNextChunk();
+        }
+    }
+
+    /**
+     * Mount every top-level block an ot-json1 operation touches. MUST run
+     * against the pre-dispatch state: applying the op to the state first and
+     * mounting afterwards would materialize the target from the updated
+     * state and then apply the op to it a second time.
+     */
+    ensureMountedForOperation(op: JSONOpList) {
+        if (!this._pendingMount)
+            return;
+
+        // Collect the leading numeric descent of every path in the op —
+        // the top-level block indices. Deeper numbers (child indices, text
+        // offsets) are never the FIRST element of a component, and branch
+        // lists nest their sub-paths as arrays.
+        let max = -1;
+        const scan = (component: unknown) => {
+            if (!Array.isArray(component) || component.length === 0)
+                return;
+            const first: unknown = component[0];
+            if (typeof first === 'number') {
+                if (first > max)
+                    max = first;
+            }
+            else if (Array.isArray(first)) {
+                for (const child of component)
+                    scan(child);
+            }
+        };
+        scan(op);
+
+        // Mount one PAST the deepest touched index: a replace picks the
+        // target out of the live tree and then drops the replacement before
+        // the next sibling — that reference sibling must already be mounted,
+        // or the drop would materialize it from the post-dispatch state.
+        if (max >= 0)
+            this.ensureMountedThrough(max + 1);
+    }
+
+    /**
+     * While the incremental pick/drop walker applies an operation, on-demand
+     * materialization must stay OFF: the state is already post-dispatch, so
+     * mounting during the walk would materialize nodes the walker itself is
+     * about to insert (duplicating them). Targets are pre-mounted from the
+     * pre-dispatch state instead (`ensureMountedForOperation`).
+     */
+    suspendOnDemandMount() {
+        this._onDemandMountSuspended = true;
+    }
+
+    resumeOnDemandMount() {
+        this._onDemandMountSuspended = false;
+    }
+
+    /**
+     * Synchronously mount blocks until the top-level index is available.
+     * Bounded consumers (offset-based cursor restore, path queries into the
+     * tail, outline click-to-scroll) use this instead of a full flush.
+     */
+    ensureMountedThrough(index: number) {
+        const pending = this._pendingMount;
+        if (!pending || index < this.children.length)
+            return;
+
+        // See _mountNextChunk: pending edit ops must land in the state
+        // before the live child count is used as a cursor into it.
+        this.muya.editor.jsonState.flush();
+
+        const states = this.muya.editor.jsonState.peekState();
+        if (index >= states.length - 1) {
+            this.flushPendingMount();
+            return;
+        }
+
+        if (pending.handle !== null) {
+            clearTimeout(pending.handle);
+            pending.handle = null;
+        }
+        this._appendFromState(states, this.children.length, index + 1);
+        this.muya.eventCenter.emit('muya-mount-progress', {
+            mounted: this.children.length,
+            total: states.length,
+        });
+        this._scheduleNextChunk();
+    }
+
+    override lastContentInDescendant() {
+        // End-of-document consumers (Ctrl+End, select-all, cursor restore)
+        // must see the real last block, not the last mounted chunk.
+        this.flushPendingMount();
+
+        return super.lastContentInDescendant();
+    }
+
+    /** Synchronously finish a chunked mount that is still in flight. */
+    flushPendingMount() {
+        const pending = this._pendingMount;
+        if (!pending)
+            return;
+
+        if (pending.handle !== null)
+            clearTimeout(pending.handle);
+        this._pendingMount = null;
+
+        // See _mountNextChunk: pending edit ops must land in the state
+        // before the live child count is used as a cursor into it.
+        this.muya.editor.jsonState.flush();
+
+        const states = this.muya.editor.jsonState.peekState();
+        this._appendFromState(states, this.children.length, states.length);
+        this.muya.eventCenter.emit('muya-mount-complete', {
+            total: states.length,
+        });
+    }
+
+    /**
+     * Drop a mount that is still in flight without materializing it. Called
+     * by `updateState` before a rebuild and by `Muya.destroy` — the pending
+     * timer must never run against a torn-down instance. An explicit call is
+     * the lifecycle signal; DOM connectedness is deliberately not consulted,
+     * so detached hosts keep mounting (`new Muya(detachedElement)` works).
+     */
+    cancelPendingMount() {
+        this._stopListeningForViewportScroll();
+        if (!this._pendingMount)
+            return;
+        if (this._pendingMount.handle !== null)
+            clearTimeout(this._pendingMount.handle);
+        this._pendingMount = null;
     }
 
     /**
@@ -111,6 +496,17 @@ export class ScrollPage extends Parent {
     queryBlock(path: TBlockPath) {
         if (path.length === 0)
             return this;
+
+        // An op or lookup may target a block whose chunk has not mounted yet —
+        // mount up to the target only, never the whole remainder. Suspended
+        // while the pick/drop walker runs: see suspendOnDemandMount().
+        if (
+            this._pendingMount
+            && !this._onDemandMountSuspended
+            && (path[0] as number) >= this.children.length
+        ) {
+            this.ensureMountedThrough(path[0] as number);
+        }
 
         const p = path.shift() as number;
         const block = this.find(p) as Parent & { queryBlock: (p: TBlockPath) => Parent | Content | undefined };
@@ -187,6 +583,17 @@ export class ScrollPage extends Parent {
         const target = event.target;
 
         if (target[BLOCK_DOM_PROPERTY] === this) {
+            // While a tail is pending, the area below the mount frontier is
+            // NOT blank — the document logically continues there. Appending
+            // would land mid-document; materializing the tail on a container
+            // click would freeze a large file for taps in the gutter or
+            // between blocks, and the forced reflow then moves the real
+            // bottom below the click point anyway. Do nothing — background
+            // chunks finish shortly and end-of-document clicks behave
+            // normally again.
+            if (this._pendingMount)
+                return;
+
             const lastChild = this.lastChild as Parent;
             const lastContentBlock = lastChild.lastContentInDescendant()!;
             const { clientY } = event;

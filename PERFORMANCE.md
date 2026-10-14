@@ -49,7 +49,7 @@ carrying a table, a fenced code block and inline math — a deliberately heavy c
 | 3 | Run syntax highlighting and math typesetting only for blocks near the viewport, with placeholders elsewhere | Long-running CPU after open | **Measured and dropped.** An instrumented 1 MB open put KaTeX at 283 ms of 36 s (roughly 1 %) and Prism below that, so deferring them alone would not be felt |
 | 4 | `content-visibility: auto` plus `contain-intrinsic-size` on block elements, so off-screen blocks skip layout and paint | Scroll smoothness; open cost | **Reverted.** No change in the scroll metric, and it mistook the height of never-rendered blocks for scroll restoration; field reports of lag and visual artifacts while scrolling a selection pointed the same way |
 | 5 | Optional lightweight mode for very large documents (real-time highlighting and typesetting off by default, or a prompt on first open) | Fallback for the heaviest files | Planned |
-| 6 | Mount only what the viewport reaches, materialise the rest on demand | Removes the cost class entirely | **Partially shipped.** The mount target follows the viewport plus a three-viewport read-ahead, refreshed from a capture-phase scroll listener; a 400-section document now opens with ~190 blocks instead of 1 601, and the outline jump (or scrolling) materialises the rest. The search opts back into the whole-document background fill, because it walks block text. Unloading blocks the reader has passed would need exact heights for arbitrary selections and reading-position restore — still long-term |
+| 6 | Mount only what the viewport reaches, materialise the rest on demand | Removes the cost class entirely | **Partially shipped.** The mount target follows the viewport plus a three-viewport read-ahead, refreshed from a capture-phase scroll listener; a 400-section document now opens with ~190 blocks instead of 1 601, and the outline jump (or scrolling) materialises the rest. The search opts back into the whole-document background fill, because it walks block text. The same scheme now backs the **desktop** engine (2026-10-14): a 1 MB document settles in ~7 s instead of 41 s with only the viewport prefix mounted; outline jumps mount through the target heading first. Unloading blocks the reader has passed would need exact heights for arbitrary selections and reading-position restore — still long-term |
 | 7 | Move the draft store from `localStorage` to IndexedDB | Large documents stop being bounded by the measured ~5.2 M-character payload ceiling | Planned |
 
 ## Verification
@@ -84,11 +84,13 @@ the rule was gated by document size, which was itself a sign the trade was not w
 
 ## Desktop baseline (Windows)
 
-The desktop engine mounts every block at open and has no viewport bounding — plan item 6 has so far
-shipped in the Android engine only. Measured on 2026-10-14 by driving the packaged Windows build
-(Electron 42, Windows 10.0.26300) with `node tools/perf-baseline.mjs` over CDP; fixtures are the
-`perf/` samples, whose structure matches the Android test document (headings, paragraphs, tables,
-fenced code, inline math):
+Measured on 2026-10-14 by driving the packaged Windows build (Electron 42, Windows 10.0.26300) with
+`node tools/perf-baseline.mjs` over CDP; fixtures are the `perf/` samples, whose structure matches
+the Android test document (headings, paragraphs, tables, fenced code, inline math). "Window" is the
+time until the renderer answers CDP; "first response" until a trivial evaluate returns; "content
+stable" until the body text length stops changing across three 400 ms samples.
+
+**Before the port** — the desktop engine mounted every block at open:
 
 | Fixture | Window | First response | Content stable | Notes |
 |---|---|---|---|---|
@@ -100,18 +102,31 @@ fenced code, inline math):
 | GBK sample | 822 ms | 925 ms | 3.0 s | content correct |
 | CRLF sample | 1 180 ms | 1 309 ms | 3.5 s | content correct |
 
-"Window" is the time until the renderer answers CDP; "first response" until a trivial evaluate
-returns; "content stable" until the body text length stops changing across three 400 ms samples.
-
-1. **A 1 MB document costs about 41 s of rendering work on the desktop**, and 2 MB only starts
-   showing blocks after 92 s, while the window answers within a second. This is the mount cost of
-   plan item 6; the Android implementation is the reference for a desktop port.
-2. **Documents of 3 MB and above do not open.** The markdown-to-state conversion overflows the
+1. **A 1 MB document cost about 41 s of rendering work on the desktop**, and 2 MB only started
+   showing blocks after 92 s, while the window answered within a second. This was the mount cost of
+   plan item 6, which had shipped in the Android engine only.
+2. **Documents of 3 MB and above did not open.** The markdown-to-state conversion overflows the
    JavaScript call stack — `RangeError: Maximum call stack size exceeded`, top frame `lexBlock`,
    caller `MarkdownToState._convertMarkdownT…` (captured from the renderer console on the 5 MB
    fixture) — the open aborts and the editor pane stays empty (`.mu-container` absent when probed at
    90 s, body text limited to window chrome plus the word count). This is a parser limit separate
-   from the mount cost above.
+   from the mount cost above, and it is unchanged by the port.
+
+**After viewport-bounded mounting** (plan item 6 ported to the desktop engine, same fixtures and
+method):
+
+| Fixture | First blocks in the DOM | Content stable | Notes |
+|---|---|---|---|
+| 1 MB | 6.3 s | 7.2 s | 9 557 characters mounted (the viewport prefix) instead of 766 K |
+| 2 MB | 13.2 s | 15.2 s | 2 726 blocks mounted |
+| 3 MB | 34.1 s | 36.2 s | mounts now; used to never mount |
+| 5 MB / 10 MB | — | — | unchanged: the parser's `RangeError` still aborts the open |
+| GBK sample | — | 3.2 s | content correct |
+| CRLF sample | — | 3.1 s | content correct |
+
+The remaining open cost is the markdown parse (`markdownToState`), which runs before the first block
+appears: about 5–6 s for 1 MB, 12 s for 2 MB and 33 s for 3 MB on this machine. The port removed the
+mount cost class, not the parse — the parse is the next lever if near-instant opening matters.
 
 ## Field report follow-up
 
