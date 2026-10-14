@@ -1,7 +1,10 @@
 import { createI18n } from 'vue-i18n'
 import { compile, type MessageCompiler } from '@intlify/core-base'
 import bus from '../bus'
-// Directly import translation files
+// Directly import translation files.
+// This INLINES en.json into the renderer bundle at build time — other locales
+// load at runtime (IPC → static/locales), so an edit to en.json only reaches
+// the packaged app after `electron-vite build` runs again.
 import enTranslations from '../../../../static/locales/en.json'
 
 // vue-i18n compiles each translation lazily on first use, and its compiler
