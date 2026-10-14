@@ -100,6 +100,15 @@ export class ScrollPage extends Parent {
     private static readonly _initialMountWeight = 512;
     private static readonly _chunkBudgetMs = 4;
 
+    // How far past the viewport the mounted prefix reaches. Background chunks
+    // used to race to the end of the document, which kept the main thread busy
+    // for about a minute on a 1 MB file: memory, style and layout all scaled
+    // with the whole document while the reader only ever saw a few screens.
+    // The prefix now stops at the viewport plus this margin and resumes when
+    // scrolling approaches its edge; `mountAllInBackground()` restores the
+    // whole-document fill for consumers that genuinely need it (search).
+    private static readonly _readAheadViewports = 3;
+
     // While the user is scrolling or touching the document, background chunks
     // compete with input for the main thread: frames still render, but taps and
     // scroll gestures feel late. Pause the chain for this long after the last
@@ -113,6 +122,18 @@ export class ScrollPage extends Parent {
 
     // Timestamp until which background mounting stays paused (see _scheduleNextChunk).
     private _interactionUntil = 0;
+
+    // See mountAllInBackground().
+    private _mountAllRequested = false;
+
+    // Top-level index the chunk chain may fill up to (see _refreshMountTarget).
+    private _mountTarget = 0;
+
+    // The reader may scroll the page, the editor container or any ancestor, and
+    // a scroll event does not bubble: a capture listener on the document is the
+    // only placement that sees all three. Attached only while a mount is
+    // pending, removed by cancelPendingMount (updateState / destroy).
+    private _viewportScrollHandler: (() => void) | null = null;
 
     // See suspendOnDemandMount().
     private _onDemandMountSuspended = false;
@@ -149,8 +170,15 @@ export class ScrollPage extends Parent {
 
         // Touch, wheel and scroll all mean "the reader is interacting": defer
         // the pending mount chain until the surface has been quiet for a moment.
+        // Scrolling also *requests* more of the document — the chain restarts
+        // once the surface settles, so the read-ahead keeps up with the reader
+        // without competing with the gesture that is driving it.
         const markInteraction = () => {
             this._interactionUntil = performance.now() + ScrollPage._interactionPauseMs;
+            if (this._pendingMount) {
+                this._refreshMountTarget();
+                this._scheduleNextChunk();
+            }
         };
         for (const eventName of ['touchstart', 'touchmove', 'wheel', 'scroll'] as const)
             eventCenter.attachDOMEvent(domNode!, eventName, markInteraction);
@@ -209,9 +237,12 @@ export class ScrollPage extends Parent {
     private _mountBlocks(state: TState[]) {
         const initial = takeByWeight(state, 0, ScrollPage._initialMountWeight);
         this._appendFromState(state, 0, initial);
+        // The chain may only fill the mounted prefix until the reader scrolls.
+        this._mountTarget = initial;
 
         if (state.length > initial) {
             this._pendingMount = { handle: null };
+            this._listenForViewportScroll();
             this._scheduleNextChunk();
         }
     }
@@ -226,6 +257,84 @@ export class ScrollPage extends Parent {
                 return ScrollPage.loadBlock(block.name).create(this.muya, block);
             }),
         );
+    }
+
+    private _listenForViewportScroll() {
+        if (this._viewportScrollHandler)
+            return;
+
+        const handler = () => {
+            this._interactionUntil = performance.now() + ScrollPage._interactionPauseMs;
+            if (this._pendingMount) {
+                this._refreshMountTarget();
+                this._scheduleNextChunk();
+            }
+        };
+        document.addEventListener('scroll', handler, { capture: true, passive: true });
+        this._viewportScrollHandler = handler;
+    }
+
+    private _stopListeningForViewportScroll() {
+        if (!this._viewportScrollHandler)
+            return;
+
+        document.removeEventListener('scroll', this._viewportScrollHandler, { capture: true });
+        this._viewportScrollHandler = null;
+    }
+
+    /**
+     * Refresh the mount target from the live layout: everything the viewport
+     * plus the read-ahead margin can reach, and never less than one small step
+     * past what is already mounted (so scrolling into blank space keeps
+     * filling). Called from the scroll listener, where layout is settled —
+     * the chunk chain itself only compares counts.
+     */
+    private _refreshMountTarget() {
+        const children = this.children;
+        const states = this.muya.editor.jsonState.rawState;
+        if (children.length >= states.length)
+            return;
+
+        const margin = window.innerHeight * (1 + ScrollPage._readAheadViewports);
+        let low = 0;
+        let high = children.length;
+        while (low < high) {
+            const mid = (low + high) >> 1;
+            const rect = (children[mid] as Parent | undefined)?.domNode?.getBoundingClientRect();
+            if (rect && rect.top <= margin)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+
+        // Blocks past the mounted end have no geometry to read, so the margin
+        // is translated into a block count with the average height so far —
+        // a fling then keeps its read-ahead instead of outrunning a fixed step.
+        const mounted = (children[children.length - 1] as Parent | undefined)?.domNode
+            ?.getBoundingClientRect();
+        const averageHeight = mounted && children.length > 0
+            ? Math.max(24, mounted.bottom / children.length)
+            : 96;
+        const marginBlocks = Math.ceil(margin / averageHeight);
+        this._mountTarget = Math.max(
+            this._mountTarget,
+            low + 1,
+            children.length + Math.max(8, marginBlocks),
+        );
+    }
+
+
+    /**
+     * Fill in the rest of the document in the usual background chunks. For
+     * consumers whose result must cover every block — the search walks block
+     * text — because a viewport-bounded prefix would silently miss matches.
+     */
+    mountAllInBackground() {
+        if (!this._pendingMount || this._mountAllRequested)
+            return;
+
+        this._mountAllRequested = true;
+        this._scheduleNextChunk();
     }
 
     private _scheduleNextChunk() {
@@ -273,7 +382,11 @@ export class ScrollPage extends Parent {
                 mounted: next,
                 total: states.length,
             });
-            this._scheduleNextChunk();
+            // Stop at the viewport edge instead of racing to the end: the
+            // scroll listener moves the target as the reader moves on, and
+            // mountAllInBackground() asks for the whole document.
+            if (this._mountAllRequested || next < this._mountTarget)
+                this._scheduleNextChunk();
         }
     }
 
@@ -401,6 +514,7 @@ export class ScrollPage extends Parent {
      * so detached hosts keep mounting (`new Muya(detachedElement)` works).
      */
     cancelPendingMount() {
+        this._stopListeningForViewportScroll();
         if (!this._pendingMount)
             return;
         if (this._pendingMount.handle !== null)

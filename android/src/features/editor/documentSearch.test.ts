@@ -36,16 +36,39 @@ function createFakeEditor({ matchCounts = {} }: FakeEditorOptions = {}) {
   })
 
   const focus = vi.fn()
+  const mountAllInBackground = vi.fn()
+  const engineListeners = new Map<string, Set<() => void>>()
+  const on = vi.fn((event: string, listener: () => void) => {
+    const listeners = engineListeners.get(event) ?? new Set()
+    listeners.add(listener)
+    engineListeners.set(event, listeners)
+  })
+  const emitEngineEvent = (event: string) => {
+    for (const listener of engineListeners.get(event) ?? [])
+      listener()
+  }
   const inner = {
     history: { cutoff: vi.fn() },
     jsonState: { flush: vi.fn() },
   }
 
-  return { search, find, replace, focus, editor: inner } as unknown as MuyaEditor & {
+  return {
+    search,
+    find,
+    replace,
+    focus,
+    mountAllInBackground,
+    on,
+    emitEngineEvent,
+    editor: inner,
+  } as unknown as MuyaEditor & {
     search: typeof search
     find: typeof find
     replace: typeof replace
     focus: typeof focus
+    mountAllInBackground: typeof mountAllInBackground
+    on: typeof on
+    emitEngineEvent: (event: string) => void
     editor: typeof inner
   }
 }
@@ -61,6 +84,45 @@ function createSearchHarness(options: FakeEditorOptions & { editorMissing?: bool
 
   return { editor, scrollActiveMatchIntoView, documentSearch }
 }
+
+describe('createDocumentSearch mount coverage', () => {
+  it('opts into the whole-document fill and re-runs the query as blocks arrive', async () => {
+    const editor = createFakeEditor({ matchCounts: { apple: 3 } })
+    const documentSearch = createDocumentSearch({
+      getEditor: () => editor,
+      queryDebounceMs: 0,
+    })
+
+    documentSearch.openSearch()
+    documentSearch.setQuery('apple')
+    expect(editor.mountAllInBackground).toHaveBeenCalledTimes(1)
+
+    editor.emitEngineEvent('muya-mount-progress')
+
+    // The re-run keeps the count truthful while the fill is in flight.
+    expect(editor.search).toHaveBeenCalledTimes(2)
+    expect(documentSearch.matchCount.value).toBe(3)
+  })
+
+  it('does not re-run an empty query on mount progress', async () => {
+    const editor = createFakeEditor()
+    const documentSearch = createDocumentSearch({
+      getEditor: () => editor,
+      queryDebounceMs: 0,
+    })
+
+    documentSearch.openSearch()
+    documentSearch.setQuery('apple')
+    const callsAfterQuery = editor.search.mock.calls.length
+
+    documentSearch.setQuery('')
+
+    editor.emitEngineEvent('muya-mount-progress')
+    expect(editor.search.mock.calls.length).toBeGreaterThan(callsAfterQuery)
+    // The last call cleared the search; progress must not resurrect a match.
+    expect(documentSearch.matchCount.value).toBe(0)
+  })
+})
 
 describe('createDocumentSearch', () => {
   it('opens the find bar without touching the editor', () => {

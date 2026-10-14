@@ -157,6 +157,14 @@ declare module '@muyajs/core' {
      * mount, marktext#4887). No-op when the index is already mounted.
      */
     ensureMountedThrough(index: number): void
+    /**
+     * Mount the rest of the document in the usual background chunks. The
+     * default mount follows the viewport (blocks materialize as the reader
+     * approaches them); a consumer whose result has to cover every block —
+     * the in-document search walks block text — opts back into the
+     * whole-document fill with this.
+     */
+    mountAllInBackground(): void
     destroy(): void
   }
 

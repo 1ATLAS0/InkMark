@@ -29,10 +29,13 @@ carrying a table, a fenced code block and inline math — a deliberately heavy c
 
 1. **Frames are fine; the main thread is not.** Rendering keeps up during scroll, but input events
    wait behind engine work. The problem is main-thread occupancy, not paint performance.
-2. **The engine renders the whole document.** Every top-level block gets a DOM subtree, and every
-   code block runs syntax highlighting while every formula runs typesetting. Chunked mounting spreads
-   this work over time but does not reduce it, so the app stayed busy for over a minute after the
-   document appeared.
+2. **The engine rendered the whole document.** Every top-level block got a DOM subtree (a 1 MB
+   fixture measured 472 309 elements), and chunked mounting spread that work over time without
+   reducing it, so the app stayed busy for about a minute after the document appeared. An
+   instrumented run later split the JS side: 2 839 KaTeX renders cost 283 ms in total and Prism
+   highlighting stayed in the same low range, which leaves DOM construction, style, layout and GC as
+   the cost. The plan item that only deferred highlighting and typesetting is therefore not the
+   lever it looked like, and the mount itself is (below).
 3. **Leaving the editor pays the same cost.** Tearing down tens of thousands of nodes plus those
    caches produces sub-second frames right after the home screen appears.
 
@@ -42,10 +45,10 @@ carrying a table, a fenced code block and inline math — a deliberately heavy c
 |---|---|---|---|
 | 1 | Pause background mounting while the reader is interacting; resume once the surface is quiet | Input latency during scroll | Implemented (`_interactionPauseMs` in the scroll page scheduler) |
 | 2 | Dispose large editors after the home screen has had a frame; small documents still tear down inline | Sub-second frames when leaving | Implemented (deferred teardown above a document-size threshold) |
-| 3 | Run syntax highlighting and math typesetting only for blocks near the viewport, with placeholders elsewhere | Long-running CPU after open | Planned |
+| 3 | Run syntax highlighting and math typesetting only for blocks near the viewport, with placeholders elsewhere | Long-running CPU after open | **Measured and dropped.** An instrumented 1 MB open put KaTeX at 283 ms of 36 s (roughly 1 %) and Prism below that, so deferring them alone would not be felt |
 | 4 | `content-visibility: auto` plus `contain-intrinsic-size` on block elements, so off-screen blocks skip layout and paint | Scroll smoothness; open cost | **Reverted.** No change in the scroll metric, and it mistook the height of never-rendered blocks for scroll restoration; field reports of lag and visual artifacts while scrolling a selection pointed the same way |
 | 5 | Optional lightweight mode for very large documents (real-time highlighting and typesetting off by default, or a prompt on first open) | Fallback for the heaviest files | Planned |
-| 6 | Viewport virtualisation: keep DOM only for blocks near the viewport, materialise others on demand | Removes the cost class entirely | Long-term |
+| 6 | Mount only what the viewport reaches, materialise the rest on demand | Removes the cost class entirely | **Partially shipped.** The mount target follows the viewport plus a three-viewport read-ahead, refreshed from a capture-phase scroll listener; a 400-section document now opens with ~190 blocks instead of 1 601, and the outline jump (or scrolling) materialises the rest. The search opts back into the whole-document background fill, because it walks block text. Unloading blocks the reader has passed would need exact heights for arbitrary selections and reading-position restore — still long-term |
 | 7 | Move the draft store from `localStorage` to IndexedDB | Large documents stop being bounded by the measured ~5.2 M-character payload ceiling | Planned |
 
 ## Verification

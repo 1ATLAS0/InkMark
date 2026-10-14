@@ -238,6 +238,26 @@ export class Muya {
         this.editor.scrollPage?.ensureMountedThrough(index);
     }
 
+    /**
+     * Mount the rest of the document in the usual background chunks. The
+     * default mount follows the viewport; consumers whose result has to cover
+     * every block (search walks block text) opt back into the whole-document
+     * fill with this.
+     */
+    mountAllInBackground() {
+        this.editor.scrollPage?.mountAllInBackground();
+    }
+
+    /**
+     * Mount the rest of the document in the usual background chunks. The
+     * default mount follows the viewport; consumers whose result has to cover
+     * every block (search walks block text) opt back into the whole-document
+     * fill with this.
+     */
+    mountAllInBackground() {
+        this.editor.scrollPage?.mountAllInBackground();
+    }
+
     undo() {
         this.editor.history.undo();
     }

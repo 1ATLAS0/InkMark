@@ -123,10 +123,33 @@ export function createDocumentSearch({
     }
   }
 
+  // The engine mounts blocks as the reader scrolls; a search has to cover every
+  // block, so the first query opts back into the whole-document background fill
+  // and the query re-runs as the remaining blocks arrive — the count settles
+  // instead of silently missing matches below the mounted prefix.
+  let progressBoundEditor: ReturnType<typeof getEditor> = null
+  function ensureWholeDocumentSearched(editor: NonNullable<ReturnType<typeof getEditor>>) {
+    editor.mountAllInBackground()
+    if (progressBoundEditor === editor) {
+      return
+    }
+
+    progressBoundEditor = editor
+    editor.on('muya-mount-progress', () => {
+      if (searchOpen.value && searchQuery.value) {
+        applySearchState(editor.search(searchQuery.value, { isCaseSensitive: caseSensitive.value }))
+      }
+    })
+  }
+
   function applyQuery(value: string) {
     const editor = getEditor()
     if (!editor) {
       return
+    }
+
+    if (value) {
+      ensureWholeDocumentSearched(editor)
     }
 
     applySearchState(editor.search(value, { isCaseSensitive: caseSensitive.value }))
