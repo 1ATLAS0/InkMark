@@ -79,7 +79,10 @@ function createOrchestration(overrides: {
     syncDocumentFromEditor: vi.fn(),
     persistAndroidRecoveryDraft: vi.fn(() => overrides.recoveryKept ?? true),
     canPersistLocalDrafts: () => overrides.canPersistDrafts ?? true,
-    persistLocalDrafts: vi.fn((_drafts: LocalDraftRecord[]) => overrides.draftPersisted ?? true),
+    persistLocalDrafts: vi.fn((drafts: LocalDraftRecord[]) => {
+      void drafts
+      return overrides.draftPersisted ?? true
+    }),
     confirmIncomingOpenAfterBlockedPreserve: vi.fn(),
     getAndroidDocumentUserMessage,
     appLogger: noopLogger,

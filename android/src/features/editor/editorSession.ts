@@ -64,6 +64,12 @@ export interface EditorSessionOptions {
   ensureAndroidImageResolver: () => Promise<unknown>
   getClipboardText: () => (() => Promise<string>) | undefined
   setEditorSelectionMenuSuppression: (suppressed: boolean, reason: string) => Promise<void>
+  /**
+   * The remount bounce below flips through `home` within one frame; screen
+   * motion must stay off for those writes or the never-painted home state
+   * would animate into view.
+   */
+  setScreenMotionSuppressed?: (suppressed: boolean) => void
   installNativeSelectionTapListener: () => Promise<void>
   uninstallNativeSelectionTapListener: () => Promise<void>
   clearDraftSaveTimer: () => void
@@ -304,11 +310,15 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
     // The remount between attempts must NOT cancel its own open loop.
     destroyEditor({ updateSelectionMenuSuppression: !wasEditorOpen, preserveOpenGeneration: true })
     if (wasEditorOpen) {
+      options.setScreenMotionSuppressed?.(true)
       options.currentScreen.value = 'home'
       await nextTick()
     }
     options.currentScreen.value = 'editor'
     await nextTick()
+    if (wasEditorOpen) {
+      options.setScreenMotionSuppressed?.(false)
+    }
   }
 
   async function openEditor(markdown: string) {

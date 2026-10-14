@@ -1713,9 +1713,71 @@ textarea {
   color: var(--danger);
 }
 
+/* -------------------------------------------------- screen transitions */
+
+/* Screen swaps follow native navigation: the incoming screen slides in from
+   the right over the outgoing one (push), going back reverses it (pop), and
+   same-depth swaps crossfade. X-only transforms keep measured rects (heights,
+   scroll anchors) valid while a screen animates. */
+
+.app-screen-push-enter-active,
+.app-screen-push-leave-active,
+.app-screen-pop-enter-active,
+.app-screen-pop-leave-active,
+.app-screen-fade-enter-active,
+.app-screen-fade-leave-active {
+  transition:
+    transform var(--dur-standard) var(--ease-out),
+    opacity var(--dur-standard) var(--ease-out);
+}
+
+/* The leaving screen steps out of the grid so the entering screen keeps the
+   viewport to itself; stacking decides which side shows during the slide. */
+
+.app-screen-push-leave-active,
+.app-screen-pop-leave-active,
+.app-screen-fade-leave-active {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.app-screen-push-enter-active,
+.app-screen-fade-enter-active {
+  position: relative;
+  z-index: 2;
+}
+
+.app-screen-push-enter-from {
+  transform: translateX(100%);
+}
+
+.app-screen-push-leave-to {
+  transform: translateX(-16%);
+}
+
+.app-screen-pop-enter-from {
+  transform: translateX(-16%);
+}
+
+.app-screen-pop-leave-to {
+  transform: translateX(100%);
+}
+
+.app-screen-fade-enter-from,
+.app-screen-fade-leave-to {
+  opacity: 0;
+}
+
 /* ------------------------------------------------------------- motion */
 
 @media (prefers-reduced-motion: reduce) {
+  .app-screen-push-enter-active,
+  .app-screen-push-leave-active,
+  .app-screen-pop-enter-active,
+  .app-screen-pop-leave-active,
+  .app-screen-fade-enter-active,
+  .app-screen-fade-leave-active,
   .editor-sheet-enter-active,
   .editor-sheet-leave-active,
   .editor-sheet-enter-active .editor-action-panel,
