@@ -1,12 +1,45 @@
 {
-  "measuredAt": "2026-09-30T02:19:03.434Z",
+  "measuredAt": "2026-10-14T03:45:44.206Z",
   "app": "inkmark.exe",
   "results": [
     {
-      "label": "GBK 编码文件（快速自检）",
-      "windowMs": 713,
-      "renderMs": 2439,
-      "chars": 401,
+      "label": "1 MB 文档",
+      "windowMs": 874,
+      "renderMs": 40968,
+      "mainThreadMs": 988,
+      "chars": 766328,
+      "sanity": null
+    },
+    {
+      "label": "5 MB 文档",
+      "windowMs": 745,
+      "renderMs": 29511,
+      "mainThreadMs": 865,
+      "chars": 65,
+      "sanity": null
+    },
+    {
+      "label": "10 MB 文档",
+      "windowMs": 772,
+      "renderMs": 109152,
+      "mainThreadMs": 888,
+      "chars": 67,
+      "sanity": null
+    },
+    {
+      "label": "GBK 编码文件",
+      "windowMs": 822,
+      "renderMs": 3013,
+      "mainThreadMs": 925,
+      "chars": 418,
+      "sanity": true
+    },
+    {
+      "label": "CRLF 换行文件",
+      "windowMs": 1180,
+      "renderMs": 3468,
+      "mainThreadMs": 1309,
+      "chars": 388,
       "sanity": true
     }
   ]

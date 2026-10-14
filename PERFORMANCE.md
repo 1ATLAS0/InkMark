@@ -11,6 +11,7 @@ conclusions, and the order in which the problems are being addressed.
 | Background load | `adb shell top` sampling the app's CPU every few seconds after opening |
 | Scrolling | `dumpsys gfxinfo <package>` frame statistics, plus its input-latency counter |
 | Engine behaviour | `dumpsys`/CDP probes against a debug build with WebView debugging enabled |
+| Window open, mount and render (desktop) | `tools/perf-baseline.mjs` drives the packaged Windows build over CDP with the fixtures in `perf/` |
 
 Test device: vivo PD2509, Android 16. Test document: 1 MB Markdown, 2 839 sections, every section
 carrying a table, a fenced code block and inline math — a deliberately heavy construction.
@@ -81,6 +82,37 @@ Containment was removed again: it bought nothing measurable, and its estimated h
 never-rendered blocks affected scroll restoration and outline jumps (three resume tests failed until
 the rule was gated by document size, which was itself a sign the trade was not worth taking).
 
+## Desktop baseline (Windows)
+
+The desktop engine mounts every block at open and has no viewport bounding — plan item 6 has so far
+shipped in the Android engine only. Measured on 2026-10-14 by driving the packaged Windows build
+(Electron 42, Windows 10.0.26300) with `node tools/perf-baseline.mjs` over CDP; fixtures are the
+`perf/` samples, whose structure matches the Android test document (headings, paragraphs, tables,
+fenced code, inline math):
+
+| Fixture | Window | First response | Content stable | Notes |
+|---|---|---|---|---|
+| 1 MB | 874 ms | 988 ms | 40.9 s | 766 K characters rendered |
+| 2 MB | — | — | — | first blocks only appear at 92.3 s; 29 062 blocks eventually mount |
+| 3 MB | — | — | — | editor never mounts (120 s observation) |
+| 5 MB | 745 ms | 865 ms | — | editor never mounts (93 s observation) |
+| 10 MB | 772 ms | 888 ms | — | editor never mounts (109 s observation) |
+| GBK sample | 822 ms | 925 ms | 3.0 s | content correct |
+| CRLF sample | 1 180 ms | 1 309 ms | 3.5 s | content correct |
+
+"Window" is the time until the renderer answers CDP; "first response" until a trivial evaluate
+returns; "content stable" until the body text length stops changing across three 400 ms samples.
+
+1. **A 1 MB document costs about 41 s of rendering work on the desktop**, and 2 MB only starts
+   showing blocks after 92 s, while the window answers within a second. This is the mount cost of
+   plan item 6; the Android implementation is the reference for a desktop port.
+2. **Documents of 3 MB and above do not open.** The markdown-to-state conversion overflows the
+   JavaScript call stack — `RangeError: Maximum call stack size exceeded`, top frame `lexBlock`,
+   caller `MarkdownToState._convertMarkdownT…` (captured from the renderer console on the 5 MB
+   fixture) — the open aborts and the editor pane stays empty (`.mu-container` absent when probed at
+   90 s, body text limited to window chrome plus the word count). This is a parser limit separate
+   from the mount cost above.
+
 ## Field report follow-up
 
 Two symptoms reported while using the build that carried the deferred teardown and containment, both
@@ -130,3 +162,11 @@ adb shell dumpsys gfxinfo com.inkmark.app
 
 Keep the screen awake (`adb shell svc power stayon true`) and the device unlocked while measuring;
 otherwise the system freezes the app and the numbers become meaningless.
+
+```bash
+# desktop: window / first response / content stable for every fixture in perf/
+node tools/perf-baseline.mjs --app <build>/win-unpacked/inkmark.exe
+```
+
+`perf-baseline.mjs` connects to port 9333; remove any `adb forward tcp:9333` left over from device
+work first, or the measurements land on the phone's WebView.

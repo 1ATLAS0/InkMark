@@ -16,3 +16,6 @@ upstream-marktext-android/
 # 性能/编码测试物料（由 tools/make-perf-fixtures.py 生成）
 perf/*.md
 perf/*.cpuprofile
+
+# 桌面打包的临时输出目录（iNode 锁定应急用）
+desktop/dist-pack/
