@@ -749,7 +749,7 @@
     }
   },
   "about": {
-    "copyright": "Copyright © Luo Ran 2017-{year}",
+    "copyright": "InkMark © {year} · Basé sur MarkText (licence MIT)",
     "copyrightContributors": "Contributeurs aux droits d'auteur"
   },
   "commands": {

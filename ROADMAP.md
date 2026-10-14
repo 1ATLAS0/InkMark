@@ -17,14 +17,25 @@ Shipped:
   replayed after an upstream merge
 - Test baseline recorded: 946 unit tests pass, and the Playwright suite runs on Windows. Upstream
   runs that suite on Linux only, so a few Windows assumptions had to be corrected.
+- **Large documents — viewport-bounded mounting (0.20.5).** Both engines now mount the viewport plus
+  a three-viewport read-ahead instead of the whole document; opening a 1 MB document on Windows
+  settles in about 7 seconds against 41 seconds before (first blocks at 6.3 s), and leaving the
+  editor no longer pays a whole-document teardown. The Android side uses the same scheme. Search
+  opts back into a whole-document background fill, and outline jumps mount through the target block.
+  Measurements and before/after tables live in [PERFORMANCE.md](PERFORMANCE.md) and
+  [PERFORMANCE.zh-CN.md](PERFORMANCE.zh-CN.md).
+- **Android screen transitions and text handles (0.20.5).** Document opening and closing animate as
+  a native push/pop, reduced-motion is respected, and the native selection handles are replaced by
+  app-drawn ones.
 
 Open:
 
-- **Large documents.** A quadratic cost has been removed: opening a 1 MB document used to block the
-  renderer for over ten minutes and now finishes in about 35 seconds; a 240 KB document went from
-  132 seconds to 8 seconds. The remaining cost grows linearly with document size and sits in DOM
-  construction and layout rather than JavaScript (a 2 MB document takes about 63 seconds). Progressive
-  mounting is the next step; upstream has an unmerged pull request for it.
+- **Markdown parsing at scale.** With mounting bounded, the parse (`markdownToState`) dominates the
+  remaining open cost: about 5–6 s for 1 MB, 12 s for 2 MB and 33 s for 3 MB on the reference
+  machine. Incremental or streaming parsing is the next lever.
+- **Documents above about 3 MB.** The parser overflows the JavaScript call stack
+  (`RangeError: Maximum call stack size exceeded` at `lexBlock`) between 2 and 3 MB for the `perf/`
+  fixture structure; 5 MB and 10 MB do not open at all.
 - **Signed Android releases.** Until keystore secrets are configured, the release workflow attaches
   a debug-signed APK.
 - **Update round trip.** Installing an older build and confirming that it detects and applies a newer
@@ -36,12 +47,6 @@ Open:
   Android WebViews because they were hidden with `font-size: 0` only, which WebView font clamping can override;
   a 1 MB document therefore read as raw Markdown. Hiding now also sets `visibility: hidden`. Verified on a vivo
   device: a 1 MB document renders completely, including the tail and inline math.
-- **Large documents on Android: performance.** The document renders correctly, but the engine builds and
-  renders every block, so a 1 MB file keeps the main thread busy for over a minute after opening —
-  scrolling feels laggy (input latency, not dropped frames) and leaving the editor produces a
-  sub-second frame. Interaction-aware mount pausing and deferred teardown have shipped; on-demand
-  highlighting and typesetting, CSS containment and virtualisation are still open. Measurements and
-  the ordered plan live in [PERFORMANCE.md](PERFORMANCE.md).
 - **Encoding.** GB18030/GBK detection and CRLF handling need a test pass with real files.
 
 ## 0.21 — editing and export
