@@ -126,7 +126,9 @@ textarea {
 
 .home-screen {
   min-height: 100%;
-  padding: calc(env(safe-area-inset-top, 0px) + 30px) 24px 40px;
+  /* Top spacing lives on .home-top so the sticky selection bar keeps the same
+     visual offset when pinned (see .home-top.is-sticky). */
+  padding: 0 24px 40px;
   background: var(--app-bg);
 }
 
@@ -137,6 +139,28 @@ textarea {
   gap: 16px;
   max-width: 720px;
   margin: 0 auto;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 30px);
+}
+
+/* Selection mode pins the action bar to the top of the list: actions stay
+   reachable after scrolling to select rows further down. */
+.home-top.is-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Backdrop: covers the section gutters and the status-bar inset that the
+   bar's own top padding extends into, so rows never show through. */
+.home-top.is-sticky::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  bottom: 0;
+  left: -24px;
+  right: -24px;
+  background: var(--app-bg);
 }
 
 .home-top h1 {

@@ -178,7 +178,7 @@ watch(
     :aria-label="t('home.documents.aria')"
     data-testid="documents-screen"
   >
-    <header class="home-top">
+    <header class="home-top" :class="{ 'is-sticky': selectionActive }">
       <Transition name="home-top-swap" mode="out-in">
         <DocumentSelectionBar
           v-if="selectionActive"
