@@ -41,12 +41,6 @@ test.afterAll(async() => {
   if (app) await app.close()
 })
 
-// The keyword may be prefixed by a custom pointer image (`url(...) 6 12,
-// text`): the app ships an I-beam so the OS one stays legible on white
-// themes, and the resolved kind is still a text cursor.
-const cursorKind = (value: string): string =>
-  value.replace(/^url\([^)]*\)\s+-?\d+\s+-?\d+,\s*/, '')
-
 const cursorOf = (selector: string): Promise<string> =>
   page.evaluate((sel) => {
     const el = document.querySelector(sel)
@@ -77,8 +71,8 @@ test('every editable block shows the text cursor, not just headings', async() =>
     '.mu-container li',
     '.mu-container table td'
   ]) {
-    expect(cursorKind(await cursorOf(selector)), selector).toBe('text')
-    expect(cursorKind(await cursorUnderPointer(selector)), `pointer over ${selector}`).toBe('text')
+    expect(await cursorOf(selector), selector).toBe('text')
+    expect(await cursorUnderPointer(selector), `pointer over ${selector}`).toBe('text')
   }
 })
 
