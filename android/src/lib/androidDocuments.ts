@@ -137,7 +137,7 @@ interface AndroidDocumentsPlugin {
     suggestedName: string
     encoding?: string
     writeBom?: boolean
-  }): Promise<OpenedAndroidDocument | CanceledAndroidDocumentOpen>
+  }): Promise<Omit<OpenedAndroidDocument, 'markdown'> | CanceledAndroidDocumentOpen>
   openMarkdownDocument(options?: AndroidReadOptions): Promise<OpenedAndroidDocument | CanceledAndroidDocumentOpen>
   readMarkdownDocument(options: { sourceUri: string } & AndroidReadOptions): Promise<OpenedAndroidDocument>
   shareMarkdownDocument(options: {
@@ -242,7 +242,7 @@ export async function createAndroidMarkdownDocument(
     return result
   }
 
-  return normalizeOpenedDocument(result)
+  return normalizeOpenedDocument({ ...result, markdown })
 }
 
 export async function readAndroidMarkdownDocument(

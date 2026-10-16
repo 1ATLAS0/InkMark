@@ -28,6 +28,7 @@ import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -47,6 +48,8 @@ public class AndroidDocumentsPlugin extends Plugin {
     private static final int MAX_IMAGE_BYTES = 15 * 1024 * 1024;
     private static final String CALLBACK_OPEN_MARKDOWN_DOCUMENT = "openMarkdownDocumentResult";
     private static final String CALLBACK_CREATE_MARKDOWN_DOCUMENT = "createMarkdownDocumentResult";
+    private static final String STAGED_CREATE_FILE_KEY = "stagedCreateFile";
+    private static final String STAGED_CREATE_FILE_PREFIX = "markdown-create-";
     private static final String CALLBACK_PICK_IMAGE_DOCUMENT = "pickImageDocumentResult";
     private static final String EVENT_OPEN_WITH_DOCUMENT = "openWithDocument";
     private static final String EVENT_SHARE_DOCUMENT = "shareDocument";
@@ -130,13 +133,28 @@ public class AndroidDocumentsPlugin extends Plugin {
         }
 
         MarkdownWriteOptions writeOptions = getMarkdownWriteOptions(call);
+        byte[] bytes;
         try {
-            MarkdownCodec.validateBytes(markdown, writeOptions);
+            bytes = MarkdownCodec.validateBytes(markdown, writeOptions);
         } catch (DocumentReadException ex) {
             Log.w(TAG, "Android document create rejected: " + ex.getMessage());
             call.reject(ex.getMessage(), ex.code, ex);
             return;
         }
+
+        // The picker backgrounds this Activity. Capacitor saves the full call
+        // options twice in its state Bundle, which crashes around 250K chars
+        // with TransactionTooLargeException. Stage the validated bytes before
+        // launching and leave only a small cache-file token in the call.
+        File stagedFile;
+        try {
+            stagedFile = stageMarkdownCreateBytes(bytes);
+        } catch (IOException ex) {
+            call.reject("Could not prepare Markdown for saving", "DOCUMENT_WRITE_FAILED", ex);
+            return;
+        }
+        call.getData().remove("markdown");
+        call.getData().put(STAGED_CREATE_FILE_KEY, stagedFile.getName());
 
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -159,6 +177,7 @@ public class AndroidDocumentsPlugin extends Plugin {
         try {
             startActivityForResult(call, intent, CALLBACK_CREATE_MARKDOWN_DOCUMENT);
         } catch (ActivityNotFoundException ex) {
+            stagedFile.delete();
             Log.e(TAG, "No Android document creator is available", ex);
             call.reject("No Android document creator is available", "DOCUMENT_CREATOR_UNAVAILABLE", ex);
         }
@@ -864,28 +883,23 @@ public class AndroidDocumentsPlugin extends Plugin {
             return;
         }
 
-        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
-            JSObject canceled = new JSObject();
-            canceled.put("canceled", true);
-            call.resolve(canceled);
-            return;
-        }
-
-        String markdown = call.getString("markdown", null);
-        if (markdown == null) {
-            call.reject("Markdown content is required", "INVALID_MARKDOWN");
-            return;
-        }
-
-        Intent data = result.getData();
-        Uri uri = data.getData();
-        if (uri == null) {
-            call.reject("Android document creator returned no URI", "DOCUMENT_URI_MISSING");
-            return;
-        }
-
         try {
-            JSObject document = createDocumentResult(uri, data, markdown, getMarkdownWriteOptions(call));
+            if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
+                JSObject canceled = new JSObject();
+                canceled.put("canceled", true);
+                call.resolve(canceled);
+                return;
+            }
+
+            Intent data = result.getData();
+            Uri uri = data.getData();
+            if (uri == null) {
+                call.reject("Android document creator returned no URI", "DOCUMENT_URI_MISSING");
+                return;
+            }
+
+            byte[] bytes = readStagedMarkdownCreateBytes(call);
+            JSObject document = createDocumentResult(uri, data, bytes, getMarkdownWriteOptions(call));
             persistUriPermission(uri, data, DocumentGrantPolicy.Kind.DOCUMENT);
             document.put("persisted", hasPersistedReadPermission(uri));
             document.put("canWrite", canWrite(uri, data));
@@ -900,6 +914,8 @@ public class AndroidDocumentsPlugin extends Plugin {
         } catch (IOException ex) {
             Log.e(TAG, "Failed to create Android document", ex);
             call.reject("Failed to create Android document", "DOCUMENT_WRITE_FAILED", ex);
+        } finally {
+            deleteStagedMarkdownCreateBytes(call);
         }
     }
 
@@ -1117,10 +1133,9 @@ public class AndroidDocumentsPlugin extends Plugin {
     private JSObject createDocumentResult(
         Uri uri,
         Intent grantIntent,
-        String markdown,
+        byte[] bytes,
         MarkdownWriteOptions writeOptions
     ) throws IOException, DocumentReadException {
-        byte[] bytes = MarkdownCodec.validateBytes(markdown, writeOptions);
         // A freshly created document has no prior content to protect.
         writeText(uri, bytes, false);
 
@@ -1133,11 +1148,56 @@ public class AndroidDocumentsPlugin extends Plugin {
         result.put("providerName", getProviderName(uri));
         result.put("pathHint", displayName);
         result.put("mimeType", mimeType);
-        result.put("markdown", markdown);
         putMarkdownEncodingMetadata(result, writeOptions.encoding, writeOptions.writeBom);
         result.put("canWrite", canWrite(uri, grantIntent));
         result.put("persisted", hasPersistedReadPermission(uri));
         return result;
+    }
+
+    private File stageMarkdownCreateBytes(byte[] bytes) throws IOException {
+        File file = File.createTempFile(STAGED_CREATE_FILE_PREFIX, ".bin", getContext().getCacheDir());
+        try (FileOutputStream output = new FileOutputStream(file)) {
+            output.write(bytes);
+            output.getFD().sync();
+            return file;
+        } catch (IOException ex) {
+            file.delete();
+            throw ex;
+        }
+    }
+
+    private File getStagedMarkdownCreateFile(PluginCall call) {
+        String name = call.getString(STAGED_CREATE_FILE_KEY, "");
+        if (!name.matches("markdown-create-[A-Za-z0-9]+\\.bin")) {
+            return null;
+        }
+        return new File(getContext().getCacheDir(), name);
+    }
+
+    private byte[] readStagedMarkdownCreateBytes(PluginCall call) throws IOException {
+        File file = getStagedMarkdownCreateFile(call);
+        if (file == null || !file.isFile()) {
+            throw new FileNotFoundException("Prepared Markdown is no longer available");
+        }
+        try (FileInputStream input = new FileInputStream(file)) {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                if (output.size() + count > MarkdownCodec.MAX_MARKDOWN_BYTES) {
+                    throw new IOException("Prepared Markdown exceeds the document size limit");
+                }
+                output.write(buffer, 0, count);
+            }
+            return output.toByteArray();
+        }
+    }
+
+    private void deleteStagedMarkdownCreateBytes(PluginCall call) {
+        File file = getStagedMarkdownCreateFile(call);
+        if (file != null) {
+            file.delete();
+        }
     }
 
     private JSObject writeDocumentResult(
