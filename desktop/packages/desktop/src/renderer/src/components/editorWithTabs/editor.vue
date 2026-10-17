@@ -33,7 +33,10 @@
         <p class="editor-opening-hint">
           {{ t('opening.title') }}
         </p>
-        <div class="editor-opening-progress" aria-hidden="true">
+        <div
+          class="editor-opening-progress"
+          aria-hidden="true"
+        >
           <span />
         </div>
         <button
@@ -134,9 +137,11 @@ import {
   type IMuyaOptions,
   type IReplaceOption,
   type ISearchOption,
-  type ISerializedHistory
+  type ISerializedHistory,
+  type TState
 } from '@muyajs/core'
 import { getMuyaLocale } from '@/util/muyaLocale'
+import { waitForNextFrame } from '@/util/nextPaint'
 import { exportStyledHTML, type HeaderFooterPart } from '@/util/exportHtml'
 import { applyCursor, isIndexCursor } from '@/util/cursor'
 import EditorSearch from '../search/index.vue'
@@ -315,6 +320,40 @@ let scrollHandler: ((e: Event) => void) | null = null
 // store a SYNTHETIC desktop-shaped history.
 const engineHistoryByTab = new Map<string, ISerializedHistory>()
 
+// Per-tab engine STATE snapshots, captured when a tab is switched away from.
+// Switching back re-mounts from the snapshot, skipping the markdown parse that
+// otherwise freezes the renderer for seconds on a large tab.
+const engineStateByTab = new Map<string, TState[]>()
+// Tab id the live engine currently holds; updated by every content swap.
+// The store flips `currentFile` SYNCHRONOUSLY, but a swap only reaches the
+// engine after a paint frame, so the two are not the same thing during a
+// switch. Engine events (json-change, the source-mode handoff) must be
+// attributed to this owner id, never to `currentFile.id`.
+let activeTabId: string | null = null
+
+// Counts content swaps that are between the store commit and the engine swap
+// (each has to yield a paint frame first); nesting is possible when the user
+// opens a tab while another swap is still in flight. A source-mode handoff
+// arriving in that window belongs to the INCOMING tab, while the engine still
+// holds the OUTGOING document — applying it immediately would rewrite the
+// wrong document and record the outgoing history under the incoming tab.
+// Stash it and let the swap apply it once the incoming content is in place.
+let pendingSwitch = 0
+let deferredSourceHandoff: {
+  id?: string
+  markdown: string
+  cursor: unknown
+  selection: IHistorySelection | null
+} | null = null
+
+// True while the engine's document may differ from the current tab's store
+// markdown (source-mode edits live in CodeMirror until the handoff). The
+// source-mode preference covers "source mode is up right now"; the flag also
+// covers the window after source mode is LEFT but its handoff has not reached
+// the engine yet (e.g. deferred behind an in-flight switch). A swap must never
+// cache the engine state of such a tab — it would resurrect pre-source content.
+let engineDocumentStale = false
+
 // The WYSIWYG caret captured the instant the user switches INTO source mode.
 // Focus moves to CodeMirror while source mode is up, so by the time the tab is
 // handed back (`replaceContent`) the live DOM selection no longer points into
@@ -358,6 +397,9 @@ const pruneClosedTabState = (liveTabIds: Set<string>): void => {
   }
   for (const id of syntheticHistoryByTab.keys()) {
     if (!liveTabIds.has(id)) syntheticHistoryByTab.delete(id)
+  }
+  for (const id of engineStateByTab.keys()) {
+    if (!liveTabIds.has(id)) engineStateByTab.delete(id)
   }
 }
 
@@ -802,6 +844,9 @@ watch(
   sourceCode,
   (value, oldValue) => {
     if (value && value !== oldValue) {
+      // From here on CodeMirror is authoritative; the engine stops receiving
+      // edits until the handoff on exit.
+      engineDocumentStale = true
       // The viewer holds a rendering of a document that is about to stop being
       // shown, and holds the editor behind it inert while it is up.
       mediaViewer.value?.close()
@@ -1528,15 +1573,49 @@ interface FileLoadedPayload {
   id?: string
   markdown?: string
   cursor?: unknown
+  anchor?: string
 }
 
-// listen for `open-single-file` event, it will call this method only when open a new file.
-const setMarkdownToEditor = (payload: unknown) => {
-  const { id, markdown: newMarkdown, cursor: newCursor } = (payload ?? {}) as FileLoadedPayload
-  if (editor.value) {
+// Opens a NEW tab in the current window: same opening transaction as a tab
+// switch (paint first, cancelable, per-tab state cache for the outgoing tab).
+const setMarkdownToEditor = async (payload: unknown) => {
+  const { id, markdown: newMarkdown, cursor: newCursor, anchor } =
+    (payload ?? {}) as FileLoadedPayload
+  if (!editor.value) return
+
+  const openRecord = editorStore.BEGIN_DOCUMENT_OPEN(
+    currentFile.value?.filename ?? '',
+    'new-tab',
+    id ?? null
+  )
+  // Same window as a tab switch: the store already points at the new tab while
+  // the engine still holds the outgoing document (see `pendingSwitch`).
+  pendingSwitch += 1
+  try {
+    await waitForNextFrame()
+    if (!editor.value || editorStore.isDocumentOpenCancelled(openRecord.token)) {
+      editorStore.END_DOCUMENT_OPEN(openRecord.token)
+      return
+    }
+
+    if (activeTabId && activeTabId !== id) {
+      // A tab whose engine document is stale (source mode up, or its handoff
+      // not applied yet) must not be cached — see `engineDocumentStale`.
+      const engineStale = engineDocumentStale || preferencesStore.sourceCode
+      if (engineStale) {
+        engineStateByTab.delete(activeTabId)
+      } else {
+        engineStateByTab.set(activeTabId, editor.value.getState())
+      }
+    }
+
     // `setContent` resets the document and clears the undo history; only set a
     // cursor afterwards (a freshly-opened file has no history to restore).
     editor.value.setContent(newMarkdown ?? '')
+    activeTabId = id ?? null
+    // The engine now holds the incoming tab's markdown; if source mode is up,
+    // CodeMirror (not the engine) is authoritative again from here on.
+    engineDocumentStale = preferencesStore.sourceCode
     // The freshly loaded content is this tab's clean baseline (id 0). Re-seed
     // the monotonic save-tracking allocator so undoing an edit back to this
     // content reads as clean again (matches the store's `lastSavedHistoryId: 0`).
@@ -1554,12 +1633,43 @@ const setMarkdownToEditor = (payload: unknown) => {
         scrollToCursor()
       }
     }
+
+    // Source mode exited while the open was mid-flight (see `pendingSwitch`):
+    // its content is authoritative over the payload captured before the exit.
+    const handoff = deferredSourceHandoff
+    deferredSourceHandoff = null
+    if (handoff) {
+      editor.value.replaceContent(handoff.markdown, handoff.selection)
+      engineDocumentStale = false
+      if (handoff.id) engineStateByTab.delete(handoff.id)
+      if (isIndexCursor(handoff.cursor)) {
+        editor.value.setCursorByOffset(handoff.cursor)
+      }
+    }
+
     // `setContent` rebuilds the block tree synchronously but fires no
     // `json-change`, so seed the TOC explicitly (otherwise it stays empty until
     // the first edit, and a file switch keeps the previous file's TOC).
     editorStore.UPDATE_TOC(editor.value.getTOC())
     // A freshly created/opened tab should be ready to type into.
     focusFreshEditor()
+    if (anchor) editorStore.SCROLL_TO_ANCHOR(anchor)
+
+    // A Cancel click made while the parse blocked the thread is still queued;
+    // yield a frame so it lands before the open is declared done.
+    await waitForNextFrame()
+    if (editorStore.isDocumentOpenCancelled(openRecord.token)) {
+      revertToOpeningPreviousTab(openRecord)
+      editorStore.END_DOCUMENT_OPEN(openRecord.token)
+      return
+    }
+    editorStore.END_DOCUMENT_OPEN(openRecord.token)
+  } finally {
+    pendingSwitch -= 1
+    if (deferredSourceHandoff) {
+      if (deferredSourceHandoff.id) engineStateByTab.delete(deferredSourceHandoff.id)
+      deferredSourceHandoff = null
+    }
   }
 }
 
@@ -1573,10 +1683,39 @@ interface FileChangePayload {
   muyaIndexCursor?: unknown
   blocks?: unknown
   isReload?: boolean
+  newTab?: boolean
+  anchor?: string
+}
+
+// A background tab reloaded from disk: its cached engine snapshot is stale.
+const handleTabSnapshotStale = (payload: unknown) => {
+  const tabId = (payload as { id?: string } | null)?.id
+  if (tabId) engineStateByTab.delete(tabId)
+}
+
+// Put the document of the tab the cancelled open came from back on screen.
+// The store already points at it; the engine state cache makes the restore a
+// mount instead of a re-parse (markdown only as a last resort).
+const revertToOpeningPreviousTab = (record: { previousTabId: string | null }): void => {
+  const previousTabId = record.previousTabId
+  const previousTab = previousTabId
+    ? editorStore.tabs.find((entry) => entry.id === previousTabId)
+    : undefined
+  if (!editor.value || !previousTab || typeof previousTab.markdown !== 'string') return
+  const previousState = previousTabId ? engineStateByTab.get(previousTabId) : undefined
+  editor.value.setContent(previousState ?? previousTab.markdown)
+  activeTabId = previousTab.id ?? null
+  // Source mode keeps CodeMirror authoritative; otherwise the engine matches
+  // the tab's store markdown again.
+  engineDocumentStale = preferencesStore.sourceCode
+  editorStore.UPDATE_TOC(editor.value.getTOC())
+  if (previousTab.cursor) applyCursor(editor.value, previousTab.cursor)
+  const previousHistory = previousTab.id ? engineHistoryByTab.get(previousTab.id) : undefined
+  if (previousHistory) editor.value.setHistory(previousHistory)
 }
 
 // listen for markdown change form source mode or change tabs etc
-const handleFileChange = (payload: unknown) => {
+const handleFileChange = async (payload: unknown) => {
   const {
     id,
     markdown: newMarkdown,
@@ -1584,7 +1723,9 @@ const handleFileChange = (payload: unknown) => {
     muyaIndexCursor,
     history: payloadHistory,
     scrollTop,
-    isReload
+    isReload,
+    newTab,
+    anchor
   } = (payload ?? {}) as FileChangePayload
   if (!editor.value) return
   const container = getScrollContainer()
@@ -1612,11 +1753,29 @@ const handleFileChange = (payload: unknown) => {
       isIndexCursor(muyaIndexCursor) && !newCursor && payloadHistory == null
 
     if (isSourceModeHandoff) {
+      if (pendingSwitch > 0 && activeTabId !== id) {
+        // The engine still holds the outgoing document (the swap waits for a
+        // paint frame). Applying this now would write the incoming tab's
+        // source content into the outgoing document and, because
+        // `json-change` fires with the store already pointing at the incoming
+        // tab, record the outgoing history under the incoming id. The swap
+        // applies the handoff once the incoming content is live.
+        deferredSourceHandoff = {
+          id,
+          markdown: newMarkdown,
+          cursor: muyaIndexCursor,
+          selection: preSourceModeSelection
+        }
+        preSourceModeSelection = null
+        return
+      }
       // Record the bulk source-mode edit as a single undo boundary. When the
       // document is unchanged this is a no-op (returns false) and the existing
       // history/content already match — either way the caret still needs
       // remapping below.
       editor.value.replaceContent(newMarkdown, preSourceModeSelection)
+      engineDocumentStale = false
+      if (id) engineStateByTab.delete(id)
       preSourceModeSelection = null
       editorStore.UPDATE_TOC(editor.value.getTOC())
       // Map the CodeMirror `{ line, ch }` cursor onto a block-key cursor so the
@@ -1638,41 +1797,128 @@ const handleFileChange = (payload: unknown) => {
       // otherwise mark the tab dirty against the stale (pre-reload) baseline.
       if (id) {
         resetSyntheticHistory(id, newMarkdown)
+        engineStateByTab.delete(id)
       }
       editor.value.replaceContent(newMarkdown)
+      // The engine now matches the reloaded store content; if source mode is
+      // up, CodeMirror becomes authoritative again after this point.
+      engineDocumentStale = preferencesStore.sourceCode
       editorStore.UPDATE_TOC(editor.value.getTOC())
       if (newCursor) {
         applyCursor(editor.value, newCursor)
       }
     } else {
-      // Tab switch / programmatic content swap: `setContent` replaces the
-      // document and clears history, so restore the real engine history (kept
-      // per-tab) afterwards — preserves undo/redo on in-session tab switch. The
-      // `history` in the payload is the synthetic desktop-shaped history used
-      // for save tracking, not the engine history.
-      editor.value.setContent(newMarkdown)
-      // Tab switch swaps content without firing `json-change`, so re-seed the
-      // TOC (otherwise returning to an open tab keeps the other tab's TOC).
-      editorStore.UPDATE_TOC(editor.value.getTOC())
-      if (newCursor) {
-        applyCursor(editor.value, newCursor)
-      } else if (isIndexCursor(muyaIndexCursor)) {
-        // Source-mode handoff for a tab the engine has no history for (e.g.
-        // first interaction after load): fall back to a caret-only remap. The
-        // engine runs its own setContent dance internally, so restore the
-        // history after.
-        editor.value.setCursorByOffset(muyaIndexCursor)
-      }
-      const savedEngineHistory = id ? engineHistoryByTab.get(id) : undefined
-      if (savedEngineHistory) {
-        editor.value.setHistory(savedEngineHistory)
-      }
-      // First activation of a tab the save-tracking allocator has never seen:
-      // seed its clean baseline from the engine's serialization now, before
-      // any edit. For a tab that already has a tracker this is a no-op —
-      // switching back must keep the existing content -> id map.
-      if (id) {
-        getSyntheticHistory(id, editor.value.getMarkdown())
+      // A new tab's content is applied by the `file-loaded` handler under its
+      // own opening transaction; applying it here would parse it twice.
+      if (newTab) return
+
+      // Tab switch / programmatic content swap. The outgoing tab's engine
+      // state is cached first: switching back re-mounts from that snapshot
+      // (`setContent(state)` skips the markdown parse that used to freeze the
+      // renderer for seconds on large tabs). The opening surface stays up
+      // while an uncached tab parses, and Cancel abandons the switch.
+      const openRecord = editorStore.BEGIN_DOCUMENT_OPEN(
+        currentFile.value?.filename ?? '',
+        'switch'
+      )
+      // Until `setContent` below, the engine still holds the OUTGOING tab
+      // while the store already points at the incoming one.
+      pendingSwitch += 1
+      try {
+        await waitForNextFrame()
+        if (!editor.value || editorStore.isDocumentOpenCancelled(openRecord.token)) {
+          editorStore.END_DOCUMENT_OPEN(openRecord.token)
+          return
+        }
+
+        const outgoingTabId = activeTabId
+        // A tab whose engine document is stale (source mode up, or its handoff
+        // still pending) must not be cached — see `engineDocumentStale`.
+        const engineStale = engineDocumentStale || preferencesStore.sourceCode
+        if (outgoingTabId && outgoingTabId !== id) {
+          if (engineStale) {
+            engineStateByTab.delete(outgoingTabId)
+          } else {
+            engineStateByTab.set(outgoingTabId, editor.value.getState())
+          }
+        }
+        const cachedState = !engineStale && id ? engineStateByTab.get(id) : undefined
+
+        // `setContent` replaces the document and clears history, so restore the
+        // real engine history (kept per-tab) afterwards — preserves undo/redo on
+        // in-session tab switch. The `history` in the payload is the synthetic
+        // desktop-shaped history used for save tracking, not the engine history.
+        editor.value.setContent(cachedState ?? newMarkdown)
+        activeTabId = id ?? null
+        // The engine now holds the incoming tab's markdown; if source mode is
+        // up, CodeMirror (not the engine) is authoritative again from here on.
+        engineDocumentStale = preferencesStore.sourceCode
+        // Tab switch swaps content without firing `json-change`, so re-seed the
+        // TOC (otherwise returning to an open tab keeps the other tab's TOC).
+        editorStore.UPDATE_TOC(editor.value.getTOC())
+        if (newCursor) {
+          applyCursor(editor.value, newCursor)
+        } else if (isIndexCursor(muyaIndexCursor)) {
+          // Source-mode handoff for a tab the engine has no history for (e.g.
+          // first interaction after load): fall back to a caret-only remap. The
+          // engine runs its own setContent dance internally, so restore the
+          // history after.
+          editor.value.setCursorByOffset(muyaIndexCursor)
+        }
+        const savedEngineHistory = id ? engineHistoryByTab.get(id) : undefined
+        if (savedEngineHistory) {
+          editor.value.setHistory(savedEngineHistory)
+        }
+
+        // A source handoff that arrived before the swap was applied (see
+        // `pendingSwitch`). The source editor's content is authoritative — it
+        // may have been edited after the switch payload was captured. Run it on
+        // top of the restored history: unchanged content is a no-op, and a real
+        // source edit appends exactly one undo boundary to THIS tab's stack.
+        const handoff = deferredSourceHandoff
+        deferredSourceHandoff = null
+        if (handoff) {
+          editor.value.replaceContent(handoff.markdown, handoff.selection)
+          engineDocumentStale = false
+          if (handoff.id) engineStateByTab.delete(handoff.id)
+          editorStore.UPDATE_TOC(editor.value.getTOC())
+          if (isIndexCursor(handoff.cursor)) {
+            editor.value.setCursorByOffset(handoff.cursor)
+          }
+        }
+
+        // First activation of a tab the save-tracking allocator has never seen:
+        // seed its clean baseline from the engine's serialization now, before
+        // any edit. For a tab that already has a tracker this is a no-op —
+        // switching back must keep the existing content -> id map.
+        if (id) {
+          getSyntheticHistory(id, editor.value.getMarkdown())
+        }
+
+        // The anchor scroll waits for the content (the switch is asynchronous).
+        if (anchor) editorStore.SCROLL_TO_ANCHOR(anchor)
+
+        // A Cancel click made while the parse blocked the thread is still
+        // queued; yield a frame so it lands before the switch is declared done.
+        await waitForNextFrame()
+        if (editorStore.isDocumentOpenCancelled(openRecord.token)) {
+          revertToOpeningPreviousTab(openRecord)
+          editorStore.END_DOCUMENT_OPEN(openRecord.token)
+          return
+        }
+        editorStore.END_DOCUMENT_OPEN(openRecord.token)
+      } finally {
+        pendingSwitch -= 1
+        if (deferredSourceHandoff) {
+          // The incoming tab was never swapped in (or the handoff lost a race
+          // with the cancel). Its source content already lives in the store;
+          // just drop the stale engine snapshot so the next activation parses
+          // the fresh markdown.
+          if (deferredSourceHandoff.id) {
+            engineStateByTab.delete(deferredSourceHandoff.id)
+          }
+          deferredSourceHandoff = null
+        }
       }
     }
   } else if (newCursor) {
@@ -1776,7 +2022,7 @@ onMounted(async () => {
   // built, and let the reader abandon the open. Two animation frames give the
   // overlay a painted frame before the parse occupies the renderer — without
   // them a quick open would never show the animation at all.
-  const openToken = editorStore.BEGIN_DOCUMENT_OPEN(currentFile.value?.filename ?? '')
+  const openRecord = editorStore.BEGIN_DOCUMENT_OPEN(currentFile.value?.filename ?? '')
   await new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
@@ -1872,8 +2118,8 @@ onMounted(async () => {
   }
 
   // Cancelled during the paint frames above: skip the parse entirely.
-  if (editorStore.isDocumentOpenCancelled(openToken) || !editorRef.value) {
-    editorStore.END_DOCUMENT_OPEN(openToken)
+  if (editorStore.isDocumentOpenCancelled(openRecord.token) || !editorRef.value) {
+    editorStore.END_DOCUMENT_OPEN(openRecord.token)
     return
   }
 
@@ -1889,21 +2135,23 @@ onMounted(async () => {
     muya.init()
   } catch (error) {
     // Never leave the opening overlay covering a failed mount.
-    editorStore.END_DOCUMENT_OPEN(openToken)
+    editorStore.END_DOCUMENT_OPEN(openRecord.token)
     throw error
   }
   editor.value = muya
+  activeTabId = currentFile.value?.id ?? null
+  engineDocumentStale = false
   // A Cancel click made while the parse blocked the thread is still queued in
   // the input pipeline. Yield one frame before hiding the opening state so it
   // lands on the button instead of the editor underneath.
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-  if (editorStore.isDocumentOpenCancelled(openToken)) {
-    editorStore.END_DOCUMENT_OPEN(openToken)
+  if (editorStore.isDocumentOpenCancelled(openRecord.token)) {
+    editorStore.END_DOCUMENT_OPEN(openRecord.token)
     editor.value?.destroy()
     editor.value = null
     return
   }
-  editorStore.END_DOCUMENT_OPEN(openToken)
+  editorStore.END_DOCUMENT_OPEN(openRecord.token)
   // A fresh document starts with no search to re-run during its mount fill.
   lastSearchQuery = null
   // The first document's content is set via constructor options, so no
@@ -1937,6 +2185,7 @@ onMounted(async () => {
 
   // listen for bus events.
   bus.on('file-loaded', setMarkdownToEditor)
+  bus.on('tab-snapshot-stale', handleTabSnapshotStale)
   bus.on('invalidate-image-cache', handleInvalidateImageCache)
   bus.on('undo', handleUndo)
   bus.on('redo', handleRedo)
@@ -1975,11 +2224,14 @@ onMounted(async () => {
   // block AST), so we compute it here — mirroring the legacy engine's
   // `dispatchChange` payload.
   editor.value.on('json-change', () => {
-    // There is a chance that this event is fired AFTER the tab is switched. If we purely rely on this.currentFile later on
-    // it can cause invalid updates. Hence, we need the id to identify changes as part of each tab
-    if (!currentFile.value || !editor.value) return
-    const { id } = currentFile.value
-    if (!id) return
+    // Attribute the change to the tab the ENGINE currently holds, not to the
+    // store's `currentFile`: during a tab switch the store flips
+    // synchronously while the engine swap waits a frame, and a queued flush
+    // from the outgoing tab lands in that window. Using `currentFile` there
+    // recorded the outgoing history under the incoming tab's id, which
+    // resurrected the wrong document on the next undo.
+    if (!currentFile.value || !editor.value || !activeTabId) return
+    const id = activeTabId
     const markdown = editor.value.getMarkdown()
     // Stash the real engine history for in-session tab-switch restoration. The
     // synthetic save-tracking id is derived from the live document content (a
@@ -2109,6 +2361,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   bus.off('file-loaded', setMarkdownToEditor)
+  bus.off('tab-snapshot-stale', handleTabSnapshotStale)
   bus.off('invalidate-image-cache', handleInvalidateImageCache)
   bus.off('undo', handleUndo)
   bus.off('redo', handleRedo)

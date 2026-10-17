@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import type { ElectronApplication, Page } from 'playwright'
 import {
+  enterSourceMode,
+  exitSourceMode,
   getMarkdownContent,
   launchWithMarkdown,
   placeCaretInEditor,
@@ -296,6 +298,63 @@ test.describe('Tab management', () => {
       await expect.poll(isDirty, { timeout: 5000 }).toBe(false)
     } finally {
       await aApp.close()
+    }
+  })
+
+  // Source-mode edits live in CodeMirror / the store until the handoff, never
+  // in the hidden engine. Leaving such a tab must not cache the engine's stale
+  // pre-source document: switching back after source mode was left on ANOTHER
+  // tab would otherwise resurrect the content from before the edits.
+  test('source-mode edits survive switching away and leaving source mode on another tab', async() => {
+    const launch = await launchWithMarkdown('alpha base\n')
+    const sApp = launch.app
+    const sPage = launch.page
+    try {
+      await sendIpcToRenderer(sApp, 'mt::new-untitled-tab', true, 'bravo base\n')
+      await sPage.waitForFunction(
+        (sel) => document.querySelectorAll(sel).length >= 2,
+        tabSelector,
+        { timeout: 5000 }
+      )
+      await sPage.waitForTimeout(250)
+
+      // Back to A, edit it in source mode.
+      await sendIpcToRenderer(sApp, 'mt::switch-tab-by-index', 0)
+      await expect
+        .poll(async() => (await getMarkdownContent(sPage, sApp)).trim(), { timeout: 5000 })
+        .toContain('alpha base')
+      await enterSourceMode(sPage, sApp)
+      await sPage.evaluate(() => {
+        const cm = (
+          document.querySelector('.source-code .CodeMirror') as Element & {
+            CodeMirror: {
+              focus(): void
+              setCursor(p: { line: number, ch: number }): void
+              replaceSelection(text: string): void
+            }
+          }
+        ).CodeMirror
+        cm.focus()
+        cm.setCursor({ line: 0, ch: 'alpha base'.length })
+        cm.replaceSelection(' SRCEDIT')
+      })
+
+      // Switch to B while still in source mode, then leave source mode there.
+      await sendIpcToRenderer(sApp, 'mt::switch-tab-by-index', 1)
+      await expect
+        .poll(async() => (await getMarkdownContent(sPage, sApp)).trim(), { timeout: 5000 })
+        .toContain('bravo base')
+      await exitSourceMode(sPage, sApp)
+
+      // Back to A in WYSIWYG: the source edit must be there, not the cached
+      // pre-source document.
+      await sendIpcToRenderer(sApp, 'mt::switch-tab-by-index', 0)
+      await expect.poll(
+        () => sPage.evaluate(() => document.querySelector('.mu-container')?.textContent ?? ''),
+        { timeout: 8000 }
+      ).toContain('SRCEDIT')
+    } finally {
+      await sApp.close()
     }
   })
 

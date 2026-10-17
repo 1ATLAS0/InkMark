@@ -26,6 +26,12 @@ const ENABLE_ANDROID_SELECTION_DIAGNOSTICS = false
 // retryEditorFromRecovery), never an endless in-page Retry.
 const MAX_INIT_ATTEMPTS = 2
 const INIT_RETRY_DELAY_MS = 250
+// A cold open spends seconds in the parse, but a warm reopen (all chunks
+// loaded, small document) can finish in a few frames — the opening surface
+// would flash by and read as "no animation". Keep it on screen for at least
+// this long so the transition is consistent on every open and Cancel stays
+// reachable.
+const MIN_OPENING_VISIBLE_MS = 450
 
 interface EditorSessionLogger {
   debug(message: string, context?: unknown): void
@@ -170,6 +176,9 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
   // instead of racing a newer one — a coarser guard than editorInitToken that
   // also survives the destroy/remount each attempt performs.
   let openGeneration = 0
+  // When the opening surface first painted in the current open. Used to hold
+  // it for `MIN_OPENING_VISIBLE_MS` on warm opens.
+  let openingPaintedAt = 0
   let editorSelectionDiagnosticCleanup: (() => void) | null = null
   let editorInputDiagnosticCleanup: (() => void) | null = null
 
@@ -276,6 +285,15 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
       if (token !== editorInitToken) {
         return 'superseded'
       }
+      // A warm open can reach this point in a few frames. Hold the already
+      // painted opening surface for its minimum beat so the animation is not
+      // skipped unseen on every open after the first.
+      const visibleFor = performance.now() - openingPaintedAt
+      if (openingPaintedAt && visibleFor < MIN_OPENING_VISIBLE_MS) {
+        await new Promise<void>(resolve => {
+          window.setTimeout(resolve, MIN_OPENING_VISIBLE_MS - visibleFor)
+        })
+      }
       // A Cancel click made while the parse blocked the thread is still queued
       // in the input pipeline. Yield one frame before replacing the opening
       // state so that click lands on the cancel affordance instead of the
@@ -326,14 +344,18 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
     }
     options.currentScreen.value = 'editor'
     await nextTick()
-    if (!wasEditorOpen) {
-      // Give the browser a painted frame of the opening state before the
-      // document parse occupies the main thread: without it a fast open would
-      // never show the animation (and the cancel affordance) at all. Two
-      // frames: the first schedules, the second runs after that frame paints.
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-      })
+    // Give the browser a painted frame of the opening state before the
+    // document parse occupies the main thread: without it a fast open would
+    // never show the animation (and the cancel affordance) at all. This must
+    // run for EVERY open, including an in-place replacement while the editor
+    // is already on screen — that path used to start parsing immediately, so
+    // only the first open ever animated. Two frames: the first schedules, the
+    // second runs after that frame paints.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    })
+    if (!openingPaintedAt) {
+      openingPaintedAt = performance.now()
     }
     if (wasEditorOpen) {
       options.setScreenMotionSuppressed?.(false)
@@ -343,6 +365,7 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
   async function openEditor(markdown: string) {
     const generation = ++openGeneration
     lastOpenedMarkdown = markdown
+    openingPaintedAt = 0
     editorFailed.value = false
     editorReady.value = false
     options.closeEditorToolbar()

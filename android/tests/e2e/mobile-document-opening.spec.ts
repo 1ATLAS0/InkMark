@@ -74,3 +74,23 @@ test('back during opening cancels instead of leaving the editor', async ({ page 
   await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
   await expect(page.getByTestId('editor-opening')).toHaveCount(0)
 })
+
+test('reopening a document after returning home shows the opening state again', async ({ page }) => {
+  test.setTimeout(120_000)
+  await seedLargeDraft(page)
+
+  await page.getByRole('button', { name: /Opening target/ }).click()
+  await expect(page.getByTestId('editor-opening')).toBeVisible()
+  await expectEditorReady(page, 60000)
+
+  // 返回首页再打开同一文档：开档动画（与取消入口）必须再次出现，
+  // 不能只在本次会话的第一次打开时出现。
+  await page.getByTestId('back-button').click()
+  await expect(page.getByRole('heading', { name: 'InkMark' })).toBeVisible()
+
+  await page.getByRole('button', { name: /Opening target/ }).click()
+  await expect(page.getByTestId('editor-opening')).toBeVisible()
+  await expect(page.getByTestId('cancel-opening-button')).toBeVisible()
+  await expectEditorReady(page, 60000)
+  await expect(page.getByTestId('editor-opening')).toHaveCount(0)
+})

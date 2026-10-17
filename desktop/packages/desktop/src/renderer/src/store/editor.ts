@@ -150,7 +150,14 @@ export interface EditorState {
   selectionWordCount: FileWordCount | null
   // Document currently being mounted into the editor. Gates the opening
   // animation + cancel affordance; cleared once the engine reports ready.
-  openingDocument: { title: string; token: number } | null
+  openingDocument: {
+    title: string
+    token: number
+    kind: 'open' | 'switch' | 'new-tab'
+    previousTabId: string | null
+    // The tab a 'new-tab' open added; Cancel removes it again.
+    tabId: string | null
+  } | null
 }
 
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -160,6 +167,9 @@ const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 // pre-mount checkpoint bail out before paying for the parse.
 let openTokenCounter = 0
 let cancelledOpenToken = -1
+// Tab that was active before the current activation: a cancelled switch has to
+// resolve it without re-emitting a content swap (the editor reverts itself).
+let lastActiveTabId: string | null = null
 
 export const useEditorStore = defineStore('editor', {
   state: (): EditorState => ({
@@ -441,6 +451,10 @@ export const useEditorStore = defineStore('editor', {
           // history (setContent), so the first undo restores the pre-reload doc.
           isReload: true
         })
+      } else if (tab.id) {
+        // A background tab's content changed on disk: drop any cached engine
+        // snapshot so switching back mounts the new content.
+        bus.emit('tab-snapshot-stale', { id: tab.id })
       }
       debouncedSendBufferedState()
     },
@@ -865,7 +879,7 @@ export const useEditorStore = defineStore('editor', {
       debouncedSendBufferedState()
     },
 
-    UPDATE_CURRENT_FILE(currentFile: IFileState): void {
+    UPDATE_CURRENT_FILE(currentFile: IFileState, options: TabOptions & { newTab?: boolean } = {}): void {
       const oldCurrentFile = this.currentFile
       let didUpdateCurrentFile = false
       if (oldCurrentFile == null || oldCurrentFile.id !== currentFile.id) {
@@ -875,6 +889,7 @@ export const useEditorStore = defineStore('editor', {
         // flushed edit is attributed to that tab and not lost on switch (#2938).
         if (oldCurrentFile) {
           this.flushActiveEditor()
+          lastActiveTabId = oldCurrentFile.id ?? null
         }
         window.DIRNAME = pathname ? window.path.dirname(pathname) : ''
         this.currentFile = currentFile
@@ -896,7 +911,14 @@ export const useEditorStore = defineStore('editor', {
           renderCursor: true,
           history,
           scrollTop,
-          blocks
+          blocks,
+          // A brand-new tab's content is applied by the `file-loaded` handler
+          // under the opening transaction; the switch handler must not apply it
+          // a second time.
+          newTab: options.newTab === true,
+          // The anchor scroll has to wait for the content to be applied (the
+          // switch is asynchronous); the editor performs it after the swap.
+          anchor: options.anchor
         })
       }
 
@@ -1018,10 +1040,26 @@ export const useEditorStore = defineStore('editor', {
       }
     },
 
-    BEGIN_DOCUMENT_OPEN(title: string): number {
+    BEGIN_DOCUMENT_OPEN(title: string, kind: 'open' | 'switch' | 'new-tab' = 'open', tabId: string | null = null) {
       const token = ++openTokenCounter
-      this.openingDocument = { title, token }
-      return token
+      this.openingDocument = {
+        title,
+        token,
+        kind,
+        previousTabId: kind === 'open' ? null : lastActiveTabId,
+        tabId
+      }
+      return this.openingDocument
+    },
+
+    /** Point the store back at a tab without emitting a content swap — the live
+     *  editor still holds that document when a switch is cancelled. */
+    RESTORE_ACTIVE_TAB(tabId: string): void {
+      const tab = this.tabs.find((entry) => entry.id === tabId)
+      if (!tab) return
+      this.currentFile = tab
+      this.selectionWordCount = null
+      this.activeHeadingSlug = null
     },
 
     END_DOCUMENT_OPEN(token: number): void {
@@ -1044,7 +1082,29 @@ export const useEditorStore = defineStore('editor', {
       if (!opening) return
       this.openingDocument = null
       cancelledOpenToken = opening.token
+      if (opening.kind === 'switch') {
+        if (opening.previousTabId) this.RESTORE_ACTIVE_TAB(opening.previousTabId)
+        // Source mode listens for this to drop the incoming tab's text: its
+        // CM was already swapped by the switch's `file-changed`, but the store
+        // has just moved back to the previous tab.
+        bus.emit('document-open-cancelled')
+        return
+      }
+      if (opening.kind === 'new-tab') {
+        // A document open, not a tab switch: the tab this transaction added
+        // must not survive the cancel. Point the store back at the previous
+        // tab BEFORE removing it, so the removal does not emit a fallback
+        // content swap behind the editor's own revert.
+        const openedTab = opening.tabId
+          ? this.tabs.find((entry) => entry.id === opening.tabId)
+          : undefined
+        if (opening.previousTabId) this.RESTORE_ACTIVE_TAB(opening.previousTabId)
+        if (openedTab) this.FORCE_CLOSE_TAB(openedTab)
+        bus.emit('document-open-cancelled')
+        return
+      }
       this.CLOSE_TAB()
+      bus.emit('document-open-cancelled')
     },
 
     LISTEN_FOR_CLOSE_TAB(): void {
@@ -1297,8 +1357,7 @@ export const useEditorStore = defineStore('editor', {
       }
       const next = tabs[nextTabIndex]
       if (!next) return
-      this.UPDATE_CURRENT_FILE(next)
-      if (options.anchor) this.SCROLL_TO_ANCHOR(options.anchor)
+      this.UPDATE_CURRENT_FILE(next, { anchor: options.anchor })
     },
 
     SWITCH_TAB_BY_INDEX(nextTabIndex: number): void {
@@ -1346,7 +1405,7 @@ export const useEditorStore = defineStore('editor', {
 
       if (selected) {
         const { id, markdown } = fileState
-        this.UPDATE_CURRENT_FILE(fileState)
+        this.UPDATE_CURRENT_FILE(fileState, { newTab: true })
         bus.emit('file-loaded', { id, markdown })
       } else {
         this.tabs.push(fileState)
@@ -1383,8 +1442,7 @@ export const useEditorStore = defineStore('editor', {
         window.fileUtils.isSamePathSync(t.pathname, pathname ?? '')
       )
       if (existingTab) {
-        this.UPDATE_CURRENT_FILE(existingTab)
-        if (options.anchor) this.SCROLL_TO_ANCHOR(options.anchor)
+        this.UPDATE_CURRENT_FILE(existingTab, { anchor: options.anchor })
         return
       }
 
@@ -1412,9 +1470,8 @@ export const useEditorStore = defineStore('editor', {
       const { id, cursor } = docState
 
       if (selected) {
-        this.UPDATE_CURRENT_FILE(docState)
-        bus.emit('file-loaded', { id, markdown, cursor })
-        if (options.anchor) this.SCROLL_TO_ANCHOR(options.anchor)
+        this.UPDATE_CURRENT_FILE(docState, { newTab: true, anchor: options.anchor })
+        bus.emit('file-loaded', { id, markdown, cursor, anchor: options.anchor })
       } else {
         this.tabs.push(docState)
         this.updateTabIdToIndex()

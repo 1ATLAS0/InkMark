@@ -133,6 +133,25 @@ const prepareTabSwitch = () => {
   }
 }
 
+// The user abandoned an in-flight tab switch. The store already points back at
+// the tab the switch came from, but the switch's `file-changed` had already
+// swapped CodeMirror to the incoming tab. Resync to the store's tab, or
+// leaving source mode would hand the wrong document back to the engine.
+const handleOpenCancelled = () => {
+  if (!editor.value) return
+  const tab = currentTab.value
+  if (!tab?.id) return
+  prepareTabSwitch()
+  tabId.value = tab.id
+  editor.value.setValue(tab.markdown ?? '')
+  if (isValidMuyaIndexCursor(tab.muyaIndexCursor)) {
+    const { anchor, focus } = tab.muyaIndexCursor
+    editor.value.setSelection(anchor, focus, { scroll: false })
+  } else {
+    setCursorAtFirstLine(editor.value)
+  }
+}
+
 interface FileChangePayloadLike {
   id: string
   markdown?: string
@@ -393,6 +412,7 @@ onMounted(() => {
 
   bus.on('file-loaded', handleFileChange)
   bus.on('file-changed', handleFileChange)
+  bus.on('document-open-cancelled', handleOpenCancelled)
   bus.on('selectAll', handleSelectAll)
   bus.on('undo', handleUndo)
   bus.on('redo', handleRedo)
@@ -430,6 +450,7 @@ onBeforeUnmount(() => {
 
   bus.off('file-loaded', handleFileChange)
   bus.off('file-changed', handleFileChange)
+  bus.off('document-open-cancelled', handleOpenCancelled)
   bus.off('selectAll', handleSelectAll)
   bus.off('undo', handleUndo)
   bus.off('redo', handleRedo)

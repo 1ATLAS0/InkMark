@@ -26,7 +26,12 @@ Shipped:
   [PERFORMANCE.zh-CN.md](PERFORMANCE.zh-CN.md).
 - **Android screen transitions and text handles (0.20.5).** Document opening and closing animate as
   a native push/pop, reduced-motion is respected, and the native selection handles are replaced by
-  app-drawn ones.
+  app-drawn ones. The opening surface paints before the parse on every open — including a warm
+  reopen and an in-place replacement — and stays up for a minimum beat so it never flashes by.
+- **Tab switching without a re-parse (0.20.5, Windows).** Every tab's engine
+  state is cached when the tab is left; switching back re-mounts from that
+  snapshot instead of parsing the markdown again, and tab / folder-list opens
+  use the same cancellable opening surface as a fresh document.
 - **Cancellable export and save tasks (0.20.5, Android).** PDF export and the
   save-with-picker flows show the same busy surface as opening, and Cancel stops
   them before the native print/share UI or picker opens.
