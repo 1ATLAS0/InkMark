@@ -748,6 +748,10 @@
       "title": "맞춤법 검사기"
     }
   },
+  "opening": {
+    "title": "여는 중…",
+    "cancel": "취소"
+  },
   "about": {
     "copyright": "InkMark © {year} · MarkText 기반 (MIT 라이선스)",
     "copyrightContributors": "저작권 기여자"

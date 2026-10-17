@@ -276,6 +276,16 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
       if (token !== editorInitToken) {
         return 'superseded'
       }
+      // A Cancel click made while the parse blocked the thread is still queued
+      // in the input pipeline. Yield one frame before replacing the opening
+      // state so that click lands on the cancel affordance instead of the
+      // editor underneath; then re-check the attempt token.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve())
+      })
+      if (token !== editorInitToken) {
+        return 'superseded'
+      }
       options.syncMarkdown('Ready')
       editorFailed.value = false
       editorReady.value = true
@@ -316,6 +326,15 @@ export function createEditorSession(options: EditorSessionOptions): EditorSessio
     }
     options.currentScreen.value = 'editor'
     await nextTick()
+    if (!wasEditorOpen) {
+      // Give the browser a painted frame of the opening state before the
+      // document parse occupies the main thread: without it a fast open would
+      // never show the animation (and the cancel affordance) at all. Two
+      // frames: the first schedules, the second runs after that frame paints.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      })
+    }
     if (wasEditorOpen) {
       options.setScreenMotionSuppressed?.(false)
     }

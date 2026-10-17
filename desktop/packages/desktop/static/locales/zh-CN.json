@@ -748,6 +748,10 @@
       "title": "拼写检查器"
     }
   },
+  "opening": {
+    "title": "正在打开…",
+    "cancel": "取消"
+  },
   "about": {
     "copyright": "InkMark © {year} · 基于 MarkText 构建（MIT 许可）",
     "copyrightContributors": "版权贡献者"

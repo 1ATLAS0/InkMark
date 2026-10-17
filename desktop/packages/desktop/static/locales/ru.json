@@ -748,6 +748,10 @@
       "title": "Проверка орфографии"
     }
   },
+  "opening": {
+    "title": "Открытие…",
+    "cancel": "Отмена"
+  },
   "about": {
     "copyright": "InkMark © {year} · На основе MarkText (лицензия MIT)",
     "copyrightContributors": "Сделано с <3 участниками GitHub"

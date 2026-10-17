@@ -78,6 +78,11 @@ export const tr = {
   'app.notice.androidExitDiscard': 'Kaydedilmemiş değişiklikler atıldı.',
 
   'editor.back': 'Geri',
+  'editor.opening': 'Açılıyor…',
+  'editor.opening.cancel': 'İptal',
+  'editor.task.exportPdf': 'PDF dışa aktarılıyor…',
+  'editor.task.save': 'Kaydediliyor…',
+  'editor.task.cancel': 'İptal',
   'editor.search': 'Ara',
   'editor.searchPlaceholder': 'Belgede bul',
   'editor.searchClose': 'Aramayı kapat',

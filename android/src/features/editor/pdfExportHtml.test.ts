@@ -79,6 +79,19 @@ describe('pdfExportHtml', () => {
     expect(withDefaults).toContain('<sub>')
   })
 
+  it('renders CJK-adjacent inline math as KaTeX in the export document', { timeout: 30_000 }, async () => {
+    const html = await renderMarkdownToPdfExportHtml({
+      markdown: '这是第1段，行内公式$E=mc^2$紧邻中文，闭合在句号前$a_b$。',
+      title: 'Math',
+      textDirection: 'ltr',
+      muya: fakeMuya({ math: true }),
+    })
+
+    expect(html).toContain('class="katex')
+    expect(html).not.toContain('$E=mc^2$')
+    expect(html).not.toContain('$a_b$')
+  })
+
   it('parses front matter as metadata instead of document content', { timeout: 30_000 }, async () => {
     const html = await renderMarkdownToPdfExportHtml({
       markdown: '---\ntitle: meta\n---\n\n# Real heading',

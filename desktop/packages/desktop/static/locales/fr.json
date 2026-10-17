@@ -748,6 +748,10 @@
       "title": "Vérification orthographique"
     }
   },
+  "opening": {
+    "title": "Ouverture…",
+    "cancel": "Annuler"
+  },
   "about": {
     "copyright": "InkMark © {year} · Basé sur MarkText (licence MIT)",
     "copyrightContributors": "Contributeurs aux droits d'auteur"

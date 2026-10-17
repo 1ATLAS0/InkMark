@@ -75,6 +75,11 @@ export const en = {
   'app.notice.androidExitDiscard': 'Unsaved changes were discarded.',
 
   'editor.back': 'Back',
+  'editor.opening': 'Opening…',
+  'editor.opening.cancel': 'Cancel',
+  'editor.task.exportPdf': 'Exporting PDF…',
+  'editor.task.save': 'Saving…',
+  'editor.task.cancel': 'Cancel',
   'editor.search': 'Search',
   'editor.searchPlaceholder': 'Find in document',
   'editor.searchClose': 'Close search',

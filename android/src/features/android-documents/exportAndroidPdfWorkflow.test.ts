@@ -62,6 +62,28 @@ describe('exportAndroidPdfWorkflow', () => {
     )
   })
 
+  it('skips the native export when the task was cancelled during rendering', async () => {
+    const renderPdfExportHtml = vi.fn(async () => '<!DOCTYPE html><html></html>')
+    const exportAndroidMarkdownPdf = vi.fn()
+    let cancelled = false
+    renderPdfExportHtml.mockImplementation(async () => {
+      cancelled = true
+      return '<!DOCTYPE html><html></html>'
+    })
+
+    const result = await exportAndroidPdfWorkflow({
+      currentDocument: createDocument('# Trip notes\n\nbody'),
+      textDirection: 'ltr',
+      renderPdfExportHtml,
+      exportAndroidMarkdownPdf,
+      getAndroidDocumentUserMessage: () => 'unused',
+      isCancelled: () => cancelled,
+    })
+
+    expect(result).toEqual({ kind: 'canceled', status: 'Ready' })
+    expect(exportAndroidMarkdownPdf).not.toHaveBeenCalled()
+  })
+
   it('reports rendering failures through the user message mapper', async () => {
     const error = new Error('muya render failed')
     const exportAndroidMarkdownPdf = vi.fn()

@@ -748,6 +748,10 @@
       "title": "Yazım Denetleyici"
     }
   },
+  "opening": {
+    "title": "Açılıyor…",
+    "cancel": "İptal"
+  },
   "about": {
     "copyright": "InkMark © {year} · MarkText üzerine kuruldu (MIT Lisansı)",
     "copyrightContributors": "Github Katkıda Bulunanlar tarafından <3 ile yapıldı"

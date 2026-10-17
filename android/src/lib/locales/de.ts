@@ -79,6 +79,11 @@ export const de = {
   'app.notice.androidExitDiscard': 'Ungespeicherte Änderungen wurden verworfen.',
 
   'editor.back': 'Zurück',
+  'editor.opening': 'Wird geöffnet…',
+  'editor.opening.cancel': 'Abbrechen',
+  'editor.task.exportPdf': 'PDF wird exportiert…',
+  'editor.task.save': 'Wird gespeichert…',
+  'editor.task.cancel': 'Abbrechen',
   'editor.search': 'Suchen',
   'editor.searchPlaceholder': 'Im Dokument suchen',
   'editor.searchClose': 'Suche schließen',

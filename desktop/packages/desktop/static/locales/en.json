@@ -748,6 +748,10 @@
       "title": "Spell Checker"
     }
   },
+  "opening": {
+    "title": "Opening…",
+    "cancel": "Cancel"
+  },
   "about": {
     "copyright": "InkMark © {year} · Built on MarkText (MIT License)",
     "copyrightContributors": "Made with <3 by Github Contributors"

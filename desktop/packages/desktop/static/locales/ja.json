@@ -748,6 +748,10 @@
       "title": "スペルチェック"
     }
   },
+  "opening": {
+    "title": "開いています…",
+    "cancel": "キャンセル"
+  },
   "about": {
     "copyright": "InkMark © {year} · MarkText をベースに構築（MIT ライセンス）",
     "copyrightContributors": "著作権貢献者"

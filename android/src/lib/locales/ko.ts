@@ -78,6 +78,11 @@ export const ko = {
   'app.notice.androidExitDiscard': '저장하지 않은 변경 사항을 폐기했습니다.',
 
   'editor.back': '뒤로',
+  'editor.opening': '여는 중…',
+  'editor.opening.cancel': '취소',
+  'editor.task.exportPdf': 'PDF 내보내는 중…',
+  'editor.task.save': '저장 중…',
+  'editor.task.cancel': '취소',
   'editor.search': '검색',
   'editor.searchPlaceholder': '문서에서 찾기',
   'editor.searchClose': '검색 닫기',

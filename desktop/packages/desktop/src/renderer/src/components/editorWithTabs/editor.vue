@@ -8,6 +8,44 @@
       ref="editorRef"
       class="editor-component"
     />
+    <!-- Opening state: an indeterminate animation with the document name and a
+         Cancel that abandons the open instead of waiting it out. -->
+    <div
+      v-if="editorStore.openingDocument"
+      class="editor-opening"
+      data-testid="editor-opening"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="editor-opening-content">
+        <img
+          class="editor-opening-mark"
+          :src="MarkTextLogo"
+          alt=""
+          aria-hidden="true"
+        >
+        <p
+          class="editor-opening-title"
+          :title="editorStore.openingDocument.title"
+        >
+          {{ editorStore.openingDocument.title }}
+        </p>
+        <p class="editor-opening-hint">
+          {{ t('opening.title') }}
+        </p>
+        <div class="editor-opening-progress" aria-hidden="true">
+          <span />
+        </div>
+        <button
+          type="button"
+          class="editor-opening-cancel"
+          data-testid="cancel-opening-button"
+          @click="editorStore.CANCEL_DOCUMENT_OPEN()"
+        >
+          {{ t('opening.cancel') }}
+        </button>
+      </div>
+    </div>
     <media-viewer
       ref="mediaViewer"
       @open-change="viewerOpen = $event"
@@ -104,6 +142,7 @@ import { applyCursor, isIndexCursor } from '@/util/cursor'
 import EditorSearch from '../search/index.vue'
 import MediaViewer from '../mediaViewer/index.vue'
 import bus from '@/bus'
+import MarkTextLogo from '../../assets/images/logo.png'
 import { DEFAULT_EDITOR_FONT_FAMILY, DEFAULT_CODE_FONT_FAMILY } from '@/config'
 import notice from '@/services/notification'
 import Printer from '@/services/printService'
@@ -1728,10 +1767,19 @@ const handleLanguageChanged = (newLocale?: unknown) => {
 }
 const resizeObserverForEditor = new ResizeObserver(handleResetPaddingBottom)
 
-onMounted(() => {
+onMounted(async () => {
   printer = new Printer()
   const ele = editorRef.value
   if (!ele) return
+
+  // The opening overlay is an open transaction: show it before the engine is
+  // built, and let the reader abandon the open. Two animation frames give the
+  // overlay a painted frame before the parse occupies the renderer — without
+  // them a quick open would never show the animation at all.
+  const openToken = editorStore.BEGIN_DOCUMENT_OPEN(currentFile.value?.filename ?? '')
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  })
 
   // Register the engine UI plugins once per renderer process (see
   // `muyaPluginsRegistered`). The image-edit tool receives the desktop's image
@@ -1823,15 +1871,39 @@ onMounted(() => {
     })
   }
 
+  // Cancelled during the paint frames above: skip the parse entirely.
+  if (editorStore.isDocumentOpenCancelled(openToken) || !editorRef.value) {
+    editorStore.END_DOCUMENT_OPEN(openToken)
+    return
+  }
+
   // `markRaw` keeps Vue from wrapping the Muya instance in a reactive Proxy.
   // The engine stores live DOM nodes and block-tree references and patches the
   // DOM via snabbdom; proxying them silently breaks identity checks so the
   // document tree never renders.
-  const muya = markRaw(new Muya(ele, options))
-  // The new engine requires an explicit init() after construction (it builds
-  // the document tree and instantiates the registered UI plugins).
-  muya.init()
+  let muya: Muya
+  try {
+    muya = markRaw(new Muya(ele, options))
+    // The new engine requires an explicit init() after construction (it builds
+    // the document tree and instantiates the registered UI plugins).
+    muya.init()
+  } catch (error) {
+    // Never leave the opening overlay covering a failed mount.
+    editorStore.END_DOCUMENT_OPEN(openToken)
+    throw error
+  }
   editor.value = muya
+  // A Cancel click made while the parse blocked the thread is still queued in
+  // the input pipeline. Yield one frame before hiding the opening state so it
+  // lands on the button instead of the editor underneath.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  if (editorStore.isDocumentOpenCancelled(openToken)) {
+    editorStore.END_DOCUMENT_OPEN(openToken)
+    editor.value?.destroy()
+    editor.value = null
+    return
+  }
+  editorStore.END_DOCUMENT_OPEN(openToken)
   // A fresh document starts with no search to re-run during its mount fill.
   lastSearchQuery = null
   // The first document's content is set via constructor options, so no

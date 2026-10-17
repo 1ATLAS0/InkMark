@@ -78,6 +78,11 @@ export const zhTW = {
   'app.notice.androidExitDiscard': '未儲存的變更已捨棄。',
 
   'editor.back': '返回',
+  'editor.opening': '正在開啟…',
+  'editor.opening.cancel': '取消',
+  'editor.task.exportPdf': '正在匯出 PDF…',
+  'editor.task.save': '正在儲存…',
+  'editor.task.cancel': '取消',
   'editor.search': '搜尋',
   'editor.searchPlaceholder': '在文件中尋找',
   'editor.searchClose': '關閉搜尋',

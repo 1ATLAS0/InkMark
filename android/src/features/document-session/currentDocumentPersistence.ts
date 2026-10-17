@@ -133,6 +133,9 @@ export interface CurrentDocumentPersistence {
   saveAndroidDocumentCopy(options?: { returnHomeAfterSave?: boolean }): Promise<boolean>
   shareCurrentMarkdownDocument(): Promise<boolean>
   exportCurrentDocumentPdf(): Promise<boolean>
+  /** Cancel the in-flight export/save task at its next checkpoint; returns
+   *  whether there was one to cancel. */
+  cancelDocumentTask(): boolean
   flushCurrentDocument(reason: string): Promise<void>
 }
 
@@ -155,6 +158,30 @@ export function createCurrentDocumentPersistence(
 ): CurrentDocumentPersistence {
   let activeAndroidSave: Promise<boolean> | null = null
   let androidSaveRequestedAfterCurrent = false
+  // The export / save-with-picker flows are cancelable: the busy overlay marks
+  // this token, and the workflow bails at its next checkpoint (never after a
+  // native write has started).
+  let activeDocumentTask: { cancelled: boolean } | null = null
+
+  function beginDocumentTask() {
+    const task = { cancelled: false }
+    activeDocumentTask = task
+    return task
+  }
+
+  function endDocumentTask(task: { cancelled: boolean }) {
+    if (activeDocumentTask === task) {
+      activeDocumentTask = null
+    }
+  }
+
+  function cancelDocumentTask(): boolean {
+    if (!activeDocumentTask) {
+      return false
+    }
+    activeDocumentTask.cancelled = true
+    return true
+  }
 
   function persistAndroidRecoveryDraft(sourceUri: string, markdown: string): boolean {
     if (!options.canPersistAndroidRecoveryDrafts()) {
@@ -399,16 +426,23 @@ export function createCurrentDocumentPersistence(
     options.savingLocalDraftToAndroid.value = true
     options.status.value = 'Choose a location'
 
-    const result = await saveLocalDraftToAndroidDocumentWorkflow({
-      draftDocument,
-      returnHomeAfterSave: saveOptions.returnHomeAfterSave === true,
-      reopenPromptOnCancel,
-      transientAccessMessage: options.getTransientAndroidSaveMessage(),
-      createAndroidMarkdownDocument: options.createAndroidMarkdownDocument,
-      getAndroidDocumentUserMessage: options.getAndroidDocumentUserMessage,
-      markdownSaveSettings: options.markdownSaveSettings.value,
-      logger: options.documentLogger,
-    })
+    const task = beginDocumentTask()
+    let result: Awaited<ReturnType<typeof saveLocalDraftToAndroidDocumentWorkflow>>
+    try {
+      result = await saveLocalDraftToAndroidDocumentWorkflow({
+        draftDocument,
+        returnHomeAfterSave: saveOptions.returnHomeAfterSave === true,
+        reopenPromptOnCancel,
+        transientAccessMessage: options.getTransientAndroidSaveMessage(),
+        createAndroidMarkdownDocument: options.createAndroidMarkdownDocument,
+        getAndroidDocumentUserMessage: options.getAndroidDocumentUserMessage,
+        isCancelled: () => task.cancelled,
+        markdownSaveSettings: options.markdownSaveSettings.value,
+        logger: options.documentLogger,
+      })
+    } finally {
+      endDocumentTask(task)
+    }
 
     try {
       if (result.kind === 'empty') {
@@ -481,19 +515,26 @@ export function createCurrentDocumentPersistence(
     options.status.value = 'Choose a location'
 
     try {
-      const result = await saveAndroidDocumentCopyWorkflow({
-        copySourceDocument,
-        originalSourceUri,
-        reservedDisplayNames: options.androidRecentDocuments.value.map(
-          document => document.displayName,
-        ),
-        returnHomeAfterSave: saveOptions.returnHomeAfterSave === true,
-        transientAccessMessage: options.getTransientAndroidSaveMessage(),
-        createAndroidMarkdownDocument: options.createAndroidMarkdownDocument,
-        getAndroidDocumentUserMessage: options.getAndroidDocumentUserMessage,
-        markdownSaveSettings: options.markdownSaveSettings.value,
-        logger: options.documentLogger,
-      })
+      const task = beginDocumentTask()
+      let result: Awaited<ReturnType<typeof saveAndroidDocumentCopyWorkflow>>
+      try {
+        result = await saveAndroidDocumentCopyWorkflow({
+          copySourceDocument,
+          originalSourceUri,
+          reservedDisplayNames: options.androidRecentDocuments.value.map(
+            document => document.displayName,
+          ),
+          returnHomeAfterSave: saveOptions.returnHomeAfterSave === true,
+          transientAccessMessage: options.getTransientAndroidSaveMessage(),
+          createAndroidMarkdownDocument: options.createAndroidMarkdownDocument,
+          getAndroidDocumentUserMessage: options.getAndroidDocumentUserMessage,
+          isCancelled: () => task.cancelled,
+          markdownSaveSettings: options.markdownSaveSettings.value,
+          logger: options.documentLogger,
+        })
+      } finally {
+        endDocumentTask(task)
+      }
 
       if (result.kind === 'canceled') {
         options.status.value = options.getAndroidEditorStatus()
@@ -596,6 +637,7 @@ export function createCurrentDocumentPersistence(
     options.exportingPdfDocument.value = true
     options.status.value = 'Exporting PDF'
 
+    const task = beginDocumentTask()
     try {
       const result = await exportAndroidPdfWorkflow({
         currentDocument,
@@ -603,12 +645,14 @@ export function createCurrentDocumentPersistence(
         renderPdfExportHtml: options.renderPdfExportHtml,
         exportAndroidMarkdownPdf: options.exportAndroidMarkdownPdf,
         getAndroidDocumentUserMessage: options.getAndroidDocumentUserMessage,
+        isCancelled: () => task.cancelled,
         logger: options.documentLogger,
       })
 
       options.status.value = result.status
       return result.kind === 'exported'
     } finally {
+      endDocumentTask(task)
       options.exportingPdfDocument.value = false
     }
   }
@@ -641,6 +685,7 @@ export function createCurrentDocumentPersistence(
     saveAndroidDocumentCopy,
     shareCurrentMarkdownDocument,
     exportCurrentDocumentPdf,
+    cancelDocumentTask,
     flushCurrentDocument,
   }
 }

@@ -748,6 +748,10 @@
       "title": "Spellingcontrole"
     }
   },
+  "opening": {
+    "title": "Bezig met openen…",
+    "cancel": "Annuleren"
+  },
   "about": {
     "copyright": "InkMark © {year} · Gebouwd op MarkText (MIT-licentie)",
     "copyrightContributors": "Gemaakt met <3 door GitHub-bijdragers"

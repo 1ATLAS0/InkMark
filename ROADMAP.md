@@ -27,6 +27,19 @@ Shipped:
 - **Android screen transitions and text handles (0.20.5).** Document opening and closing animate as
   a native push/pop, reduced-motion is respected, and the native selection handles are replaced by
   app-drawn ones.
+- **Cancellable export and save tasks (0.20.5, Android).** PDF export and the
+  save-with-picker flows show the same busy surface as opening, and Cancel stops
+  them before the native print/share UI or picker opens.
+- **Inline math in exported PDFs (0.20.5).** Chinese technical writing puts
+  `$…$` against CJK text and closes it with CJK punctuation; the export parser
+  required an ASCII boundary and silently rendered every such formula as raw
+  text. The export rules now match the editor's span rules (with a currency
+  guard), verified by engine, app and e2e tests.
+- **Cancellable document opening (0.20.5).** Both platforms show an opening state — document name,
+  an indeterminate sweep and a brand mark — instead of a blank editor, and Cancel abandons the open:
+  Android tears the pending editor down and returns home; Windows closes the tab and returns to the
+  recent list. The open waits for a painted frame before the parse so the state is visible even on
+  fast files, and a queued Cancel still lands after a long parse.
 
 Open:
 

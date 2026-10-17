@@ -271,6 +271,8 @@ export async function installAndroidAppMock(
             { name: 'readMarkdownDocument', rtype: 'promise' },
             { name: 'renameMarkdownDocument', rtype: 'promise' },
             { name: 'writeMarkdownDocument', rtype: 'promise' },
+            { name: 'exportMarkdownPdf', rtype: 'promise' },
+            { name: 'getImportedImageDirectory', rtype: 'promise' },
           ],
         },
         {
@@ -440,6 +442,28 @@ export async function installAndroidAppMock(
             }))
             return Promise.resolve({ entries })
           }
+        }
+
+        if (pluginName === 'AndroidDocuments' && methodName === 'getImportedImageDirectory') {
+          return Promise.resolve({ fileUri: 'content://test/inkmark-images' })
+        }
+
+        if (pluginName === 'AndroidDocuments' && methodName === 'exportMarkdownPdf') {
+          const exportWin = window as unknown as {
+            __exportPdfPayloads?: Array<{ html: string; suggestedName: string }>
+          }
+          exportWin.__exportPdfPayloads = exportWin.__exportPdfPayloads ?? []
+          exportWin.__exportPdfPayloads.push({
+            html: typeof options.html === 'string' ? options.html : '',
+            suggestedName:
+              typeof options.suggestedName === 'string' ? options.suggestedName : 'Export.pdf',
+          })
+          return Promise.resolve({
+            displayName:
+              typeof options.suggestedName === 'string' ? options.suggestedName : 'Export.pdf',
+            mimeType: 'application/pdf',
+            bytes: 2048,
+          })
         }
 
         if (documentMock && pluginName === 'AndroidDocuments') {

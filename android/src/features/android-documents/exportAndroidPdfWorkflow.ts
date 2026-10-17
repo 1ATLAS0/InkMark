@@ -2,6 +2,7 @@ import {
   getSuggestedPdfFileName,
   type MarkdownDocumentState,
 } from '../../lib/documentState'
+import { waitForNextFrame } from '../../lib/nextPaint'
 import type { AndroidPdfExportResult } from '../../lib/androidDocuments'
 
 interface WorkflowLogger {
@@ -14,6 +15,10 @@ export type ExportAndroidPdfResult =
       kind: 'exported'
       status: 'Share sheet opened'
       exportResult: AndroidPdfExportResult
+    }
+  | {
+      kind: 'canceled'
+      status: string
     }
   | {
       kind: 'failed'
@@ -34,6 +39,9 @@ export interface ExportAndroidPdfWorkflowOptions {
     suggestedName: string,
   ) => Promise<AndroidPdfExportResult>
   getAndroidDocumentUserMessage: (error: unknown) => string
+  /** Checked after the (synchronous) HTML render: a task cancelled while the
+   *  render blocked the thread must not open the native print/share UI. */
+  isCancelled?: () => boolean
   logger?: WorkflowLogger
 }
 
@@ -47,6 +55,7 @@ export async function exportAndroidPdfWorkflow({
   renderPdfExportHtml,
   exportAndroidMarkdownPdf,
   getAndroidDocumentUserMessage,
+  isCancelled,
   logger,
 }: ExportAndroidPdfWorkflowOptions): Promise<ExportAndroidPdfResult> {
   const suggestedName = getSuggestedPdfFileName(
@@ -60,6 +69,14 @@ export async function exportAndroidPdfWorkflow({
       title: suggestedName.replace(/\.pdf$/i, ''),
       textDirection,
     })
+    // The render is one long synchronous pass; a Cancel click made during it
+    // is still queued. Yield a frame so it lands before the checkpoint.
+    await waitForNextFrame()
+    if (isCancelled?.()) {
+      logger?.info('Android PDF export canceled before the print sheet')
+      return { kind: 'canceled', status: 'Ready' }
+    }
+
     const result = await exportAndroidMarkdownPdf(html, suggestedName)
     logger?.info('Android PDF share sheet opened', {
       displayName: result.displayName,

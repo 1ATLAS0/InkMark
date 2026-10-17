@@ -748,6 +748,10 @@
       "title": "Corretor Ortográfico"
     }
   },
+  "opening": {
+    "title": "Abrindo…",
+    "cancel": "Cancelar"
+  },
   "about": {
     "copyright": "InkMark © {year} · Baseado no MarkText (Licença MIT)",
     "copyrightContributors": "Copyright Contribuidores"

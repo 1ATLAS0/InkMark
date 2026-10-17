@@ -424,3 +424,129 @@ button.button-primary:not(.custom):focus,
 .el-tabs__active-bar {
   background-color: var(--themeColor);
 }
+
+/* ------------------------------------------------------ document opening */
+
+/* Opening a document is a transaction: the overlay names the file, sweeps an
+   indeterminate bar, and offers Cancel to abandon the open. The reveal delay
+   keeps quick opens from flashing it at all (the parse usually outlasts it). */
+.editor-opening {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  background: var(--editorBgColor);
+  animation: editor-opening-reveal 140ms ease-out 90ms forwards;
+}
+
+.editor-opening-content {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  width: min(300px, 80%);
+  text-align: center;
+}
+
+.editor-opening-mark {
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
+  animation: editor-opening-pulse 1.4s ease-in-out infinite;
+}
+
+.editor-opening-title {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--editorColor);
+  font-size: 16px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-opening-hint {
+  margin: 0;
+  color: var(--floatFontColor);
+  font-size: 13px;
+}
+
+.editor-opening-progress {
+  width: 170px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--themeColor20, rgba(128, 128, 128, 0.25));
+}
+
+.editor-opening-progress span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--themeColor);
+  animation: editor-opening-sweep 1.1s ease-out infinite;
+}
+
+.editor-opening-cancel {
+  margin-top: 6px;
+  padding: 7px 18px;
+  border: 1px solid var(--themeColor50, rgba(128, 128, 128, 0.4));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--editorColor);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.editor-opening-cancel:hover {
+  background: var(--themeColor20, rgba(128, 128, 128, 0.15));
+}
+
+@keyframes editor-opening-reveal {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes editor-opening-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.96);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes editor-opening-sweep {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(310%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-opening {
+    animation: none;
+    opacity: 1;
+  }
+
+  .editor-opening-mark,
+  .editor-opening-progress span {
+    animation: none;
+  }
+}

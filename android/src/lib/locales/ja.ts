@@ -78,6 +78,11 @@ export const ja = {
   'app.notice.androidExitDiscard': '未保存の変更を破棄しました。',
 
   'editor.back': '戻る',
+  'editor.opening': '開いています…',
+  'editor.opening.cancel': 'キャンセル',
+  'editor.task.exportPdf': 'PDF を書き出しています…',
+  'editor.task.save': '保存しています…',
+  'editor.task.cancel': 'キャンセル',
   'editor.search': '検索',
   'editor.searchPlaceholder': 'ドキュメント内を検索',
   'editor.searchClose': '検索を閉じる',

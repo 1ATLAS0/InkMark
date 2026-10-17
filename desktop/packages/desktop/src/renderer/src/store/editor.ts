@@ -148,9 +148,18 @@ export interface EditorState {
   // Heading the cursor is inside, for the TOC highlight; null above the first.
   activeHeadingSlug: string | null
   selectionWordCount: FileWordCount | null
+  // Document currently being mounted into the editor. Gates the opening
+  // animation + cancel affordance; cleared once the engine reports ready.
+  openingDocument: { title: string; token: number } | null
 }
 
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+// Opening a document is a transaction: the editor begins one before mounting
+// the engine, the overlay's Cancel ends it, and a cancelled token makes the
+// pre-mount checkpoint bail out before paying for the parse.
+let openTokenCounter = 0
+let cancelledOpenToken = -1
 
 export const useEditorStore = defineStore('editor', {
   state: (): EditorState => ({
@@ -160,7 +169,8 @@ export const useEditorStore = defineStore('editor', {
     listToc: [], // Used for equal check and for searching for the correct github-slug to jump to
     toc: [],
     activeHeadingSlug: null,
-    selectionWordCount: null
+    selectionWordCount: null,
+    openingDocument: null
   }),
 
   getters: {
@@ -1006,6 +1016,35 @@ export const useEditorStore = defineStore('editor', {
       } else {
         this.CLOSE_UNSAVED_TAB(target)
       }
+    },
+
+    BEGIN_DOCUMENT_OPEN(title: string): number {
+      const token = ++openTokenCounter
+      this.openingDocument = { title, token }
+      return token
+    },
+
+    END_DOCUMENT_OPEN(token: number): void {
+      if (this.openingDocument?.token === token) {
+        this.openingDocument = null
+      }
+    },
+
+    isDocumentOpenCancelled(token: number): boolean {
+      return cancelledOpenToken === token
+    },
+
+    /**
+     * Abandon a document that is still opening. Closing the tab reuses the
+     * normal removal path (previous tab or the recent list returns), while the
+     * cancelled token makes the pending mount abort at its next checkpoint.
+     */
+    CANCEL_DOCUMENT_OPEN(): void {
+      const opening = this.openingDocument
+      if (!opening) return
+      this.openingDocument = null
+      cancelledOpenToken = opening.token
+      this.CLOSE_TAB()
     },
 
     LISTEN_FOR_CLOSE_TAB(): void {

@@ -78,6 +78,11 @@ export const pt = {
   'app.notice.androidExitDiscard': 'As alterações não salvas foram descartadas.',
 
   'editor.back': 'Voltar',
+  'editor.opening': 'Abrindo…',
+  'editor.opening.cancel': 'Cancelar',
+  'editor.task.exportPdf': 'Exportando PDF…',
+  'editor.task.save': 'Salvando…',
+  'editor.task.cancel': 'Cancelar',
   'editor.search': 'Pesquisar',
   'editor.searchPlaceholder': 'Localizar no documento',
   'editor.searchClose': 'Fechar pesquisa',

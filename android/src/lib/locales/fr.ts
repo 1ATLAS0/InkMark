@@ -78,6 +78,11 @@ export const fr = {
   'app.notice.androidExitDiscard': 'Les modifications non enregistrées ont été abandonnées.',
 
   'editor.back': 'Retour',
+  'editor.opening': 'Ouverture…',
+  'editor.opening.cancel': 'Annuler',
+  'editor.task.exportPdf': 'Export du PDF…',
+  'editor.task.save': 'Enregistrement…',
+  'editor.task.cancel': 'Annuler',
   'editor.search': 'Rechercher',
   'editor.searchPlaceholder': 'Rechercher dans le document',
   'editor.searchClose': 'Fermer la recherche',

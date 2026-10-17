@@ -56,6 +56,24 @@ describe('saveAndroidDocumentCopyWorkflow', () => {
     })
   })
 
+  it('does not open the picker when the task was cancelled during preparation', async () => {
+    const createAndroidMarkdownDocument = vi.fn()
+
+    const result = await saveAndroidDocumentCopyWorkflow({
+      copySourceDocument: createAndroidDocumentState('# Original Save Copy\n\nbody'),
+      originalSourceUri: 'content://provider/original.md',
+      reservedDisplayNames: [],
+      returnHomeAfterSave: false,
+      transientAccessMessage: 'transient',
+      createAndroidMarkdownDocument,
+      getAndroidDocumentUserMessage: () => 'failed',
+      isCancelled: () => true,
+    })
+
+    expect(result).toEqual({ kind: 'canceled' })
+    expect(createAndroidMarkdownDocument).not.toHaveBeenCalled()
+  })
+
   it('keeps a recovery draft request when the copy is created without persisted access', async () => {
     const transientDocument = {
       ...persistedDocument,

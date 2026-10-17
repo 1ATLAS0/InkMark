@@ -468,7 +468,9 @@ describe('editorSession', () => {
       const openPromise = harness.session.openEditor('# doc')
 
       // Let attempt 1 run and fail; the loop is now parked in the retry delay.
-      await vi.advanceTimersByTimeAsync(0)
+      // The open first waits two animation frames so the opening state paints
+      // before the parse (fake timers drive rAF, so advance past them).
+      await vi.advanceTimersByTimeAsync(100)
       expect(attempt).toBe(1)
       expect(harness.currentScreen.value).toBe('editor')
       expect(harness.session.editorFailed.value).toBe(false)

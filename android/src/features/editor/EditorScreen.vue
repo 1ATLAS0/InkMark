@@ -87,6 +87,7 @@ const props = defineProps<{
   outlineItems: OutlineItem[]
   resumeCardVisible: boolean
   resumeCardText: string
+  busyTask: { kind: 'export-pdf' | 'save'; title: string } | null
   sourceModeActive: boolean
   sourceText: string
   sourceEntryCaret: number
@@ -96,6 +97,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   back: []
+  'cancel-opening': []
+  'cancel-task': []
   'retry-editor': []
   search: []
   'close-search': []
@@ -614,6 +617,75 @@ onBeforeUnmount(() => {
         :data-testid="editorReady ? 'editor-host' : 'editor-loading-host'"
       >
         <div ref="editorHost" class="muya-host" />
+      </div>
+
+      <!-- Opening state: an indeterminate animation, not a spinner that just
+           says "wait". The open is a transaction the reader can abandon —
+           cancel tears down the pending editor and returns to the home list. -->
+      <div
+        v-if="!editorReady && !editorFailed"
+        class="editor-opening"
+        data-testid="editor-opening"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="editor-opening-content">
+          <div class="editor-opening-mark" aria-hidden="true" />
+          <p
+            class="editor-opening-title"
+            :title="documentTitle"
+          >
+            {{ documentTitle }}
+          </p>
+          <p class="editor-opening-hint">
+            {{ t('editor.opening') }}
+          </p>
+          <div class="editor-opening-progress" aria-hidden="true">
+            <span />
+          </div>
+          <button
+            type="button"
+            class="editor-opening-cancel"
+            data-testid="cancel-opening-button"
+            @click="emit('cancel-opening')"
+          >
+            {{ t('editor.opening.cancel') }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Export / save work while the editor is open: the same transaction
+           surface as opening, with Cancel stopping before native writes. -->
+      <div
+        v-if="busyTask"
+        class="editor-opening"
+        data-testid="document-task-overlay"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="editor-opening-content">
+          <div class="editor-opening-mark" aria-hidden="true" />
+          <p
+            class="editor-opening-title"
+            :title="busyTask.title"
+          >
+            {{ busyTask.title }}
+          </p>
+          <p class="editor-opening-hint">
+            {{ busyTask.kind === 'export-pdf' ? t('editor.task.exportPdf') : t('editor.task.save') }}
+          </p>
+          <div class="editor-opening-progress" aria-hidden="true">
+            <span />
+          </div>
+          <button
+            type="button"
+            class="editor-opening-cancel"
+            data-testid="cancel-task-button"
+            @click="emit('cancel-task')"
+          >
+            {{ t('editor.task.cancel') }}
+          </button>
+        </div>
       </div>
 
       <!-- Source code mode: a plain monospace textarea IS the document while

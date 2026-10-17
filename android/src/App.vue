@@ -441,6 +441,21 @@ const documentTitle = computed(() => documentState.value.title)
 // identity, so it stays byte-for-byte the same in the header, the recent list,
 // rename, share, and export — it is never localized to a per-locale form.
 const displayDocumentTitle = computed(() => documentTitle.value)
+
+// Export / save work on the current document: the busy overlay names the task
+// and its Cancel stops the flow before any native write or share sheet.
+const busyDocumentTask = computed<{ kind: 'export-pdf' | 'save'; title: string } | null>(() => {
+  if (!editorReady.value) {
+    return null
+  }
+  if (exportingPdfDocument.value) {
+    return { kind: 'export-pdf', title: displayDocumentTitle.value }
+  }
+  if (savingLocalDraftToAndroid.value || savingAndroidDocumentCopy.value) {
+    return { kind: 'save', title: displayDocumentTitle.value }
+  }
+  return null
+})
 const recentDocumentRecords = computed(() =>
   [
     ...localDrafts.value
@@ -1523,6 +1538,7 @@ const {
   saveAndroidDocumentCopy,
   shareCurrentMarkdownDocument,
   exportCurrentDocumentPdf,
+  cancelDocumentTask,
   flushCurrentDocument,
 } = createCurrentDocumentPersistence({
   currentScreen,
@@ -2389,7 +2405,37 @@ function setSettingsPage(page: SettingsPage) {
   settingsPage.value = page
 }
 
+// Abandon a document that is still opening. The editor session bumps its
+// generation token, so the in-flight parse/mount stops at its next checkpoint;
+// nothing was shown or edited, so no drafts or resume entries are written.
+function cancelOpeningDocument() {
+  if (currentScreen.value !== 'editor' || editorReady.value) {
+    return
+  }
+
+  appLog.info('cancel opening document')
+  closeEditorMenu()
+  closeLinkSheet()
+  closeTableSheet()
+  closeEditorToolbar()
+  closeEditorOutline()
+  closeEditorSearch({ restoreCursor: false })
+  sourceMode.reset()
+  draftExitPromptOpen.value = false
+  androidExitPromptOpen.value = false
+  status.value = 'Ready'
+  destroyEditor()
+  currentScreen.value = 'home'
+}
+
 async function showHome() {
+  // Back while the document is still opening means "abandon the open", not
+  // "leave the editor": there is no content to save and no session to keep.
+  if (currentScreen.value === 'editor' && !editorReady.value && !editorFailed.value) {
+    cancelOpeningDocument()
+    return
+  }
+
   appLog.info('show recent home')
   closeEditorMenu()
   closeEditorToolbar()
@@ -3051,12 +3097,15 @@ onBeforeUnmount(() => {
       :source-text="sourceModeText"
       :source-entry-caret="sourceModeEntryCaret"
       :source-focus-on-enter="sourceModeFocusOnEnter"
+      :busy-task="busyDocumentTask"
       @toggle-source-mode="toggleSourceModeFromScreen"
       @update:source-text="
         (value: string, caret: { start: number, end: number } | null) =>
           sourceMode.updateText(value, caret)
       "
       @back="showHome"
+      @cancel-opening="cancelOpeningDocument"
+      @cancel-task="cancelDocumentTask"
       @retry-editor="retryEditorFromRecovery"
       @search="openEditorSearch"
       @close-search="closeEditorSearch()"

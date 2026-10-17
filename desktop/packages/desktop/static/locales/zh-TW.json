@@ -748,6 +748,10 @@
       "title": "拼字檢查"
     }
   },
+  "opening": {
+    "title": "正在開啟…",
+    "cancel": "取消"
+  },
   "about": {
     "copyright": "InkMark © {year} · 基於 MarkText 建構（MIT 授權）",
     "copyrightContributors": "版權貢獻者"

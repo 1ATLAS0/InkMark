@@ -14,6 +14,7 @@ import {
   type MarkdownSaveSettings,
 } from '../settings/advancedSettings'
 import type { OpenedAndroidDocument } from '../../lib/androidDocuments'
+import { waitForNextFrame } from '../../lib/nextPaint'
 
 interface CanceledAndroidDocumentCreate {
   canceled: true
@@ -70,6 +71,9 @@ interface SaveAndroidDocumentCopyWorkflowOptions {
     options: { encoding: MarkdownEncoding; writeBom: boolean },
   ) => Promise<AndroidDocumentCreateResult>
   getAndroidDocumentUserMessage: (error: unknown) => string
+  /** Checked before the native save picker opens: a task cancelled during
+   *  preparation must not launch it. */
+  isCancelled?: () => boolean
   markdownSaveSettings?: MarkdownSaveSettings
   now?: () => string
   logger?: WorkflowLogger
@@ -97,6 +101,7 @@ export async function saveAndroidDocumentCopyWorkflow({
   transientAccessMessage,
   createAndroidMarkdownDocument,
   getAndroidDocumentUserMessage,
+  isCancelled,
   markdownSaveSettings = DEFAULT_MARKDOWN_SAVE_SETTINGS,
   now = () => new Date().toISOString(),
   logger,
@@ -113,6 +118,12 @@ export async function saveAndroidDocumentCopyWorkflow({
   )
 
   try {
+    await waitForNextFrame()
+    if (isCancelled?.()) {
+      logger?.info('Android document copy canceled before the picker')
+      return { kind: 'canceled' }
+    }
+
     const document = await createAndroidMarkdownDocument(markdownForSave, suggestedName, {
       encoding: markdownSaveSettings.encoding,
       writeBom: copySourceDocument.hasEncodingBom,

@@ -29,6 +29,27 @@ const persistedDocument: OpenedAndroidDocument = {
 }
 
 describe('saveLocalDraftToAndroidDocumentWorkflow', () => {
+  it('does not open the picker when the task was cancelled during preparation', async () => {
+    const createAndroidMarkdownDocument = vi.fn()
+
+    const result = await saveLocalDraftToAndroidDocumentWorkflow({
+      draftDocument: createDraftDocument(),
+      returnHomeAfterSave: false,
+      reopenPromptOnCancel: true,
+      transientAccessMessage: 'transient',
+      createAndroidMarkdownDocument,
+      getAndroidDocumentUserMessage: () => 'failed',
+      isCancelled: () => true,
+    })
+
+    expect(result).toEqual({
+      kind: 'canceled',
+      status: 'Autosaved locally',
+      reopenPrompt: false,
+    })
+    expect(createAndroidMarkdownDocument).not.toHaveBeenCalled()
+  })
+
   it('returns empty without opening Android create when the draft has no content', async () => {
     const createAndroidMarkdownDocument = vi.fn()
 

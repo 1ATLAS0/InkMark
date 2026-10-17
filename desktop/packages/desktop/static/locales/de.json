@@ -748,6 +748,10 @@
       "title": "Rechtschreibprüfung"
     }
   },
+  "opening": {
+    "title": "Wird geöffnet…",
+    "cancel": "Abbrechen"
+  },
   "about": {
     "copyright": "InkMark © {year} · Basiert auf MarkText (MIT-Lizenz)",
     "copyrightContributors": "Urheberrecht Mitwirkende"

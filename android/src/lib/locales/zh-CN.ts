@@ -76,6 +76,11 @@ export const zhCN = {
   'app.notice.androidExitDiscard': '已丢弃未保存的更改。',
 
   'editor.back': '返回',
+  'editor.opening': '正在打开…',
+  'editor.opening.cancel': '取消',
+  'editor.task.exportPdf': '正在导出 PDF…',
+  'editor.task.save': '正在保存…',
+  'editor.task.cancel': '取消',
   'editor.search': '搜索',
   'editor.searchPlaceholder': '在文档中查找',
   'editor.searchClose': '关闭搜索',

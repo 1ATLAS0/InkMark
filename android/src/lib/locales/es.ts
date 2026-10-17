@@ -78,6 +78,11 @@ export const es = {
   'app.notice.androidExitDiscard': 'Se descartaron los cambios sin guardar.',
 
   'editor.back': 'Atrás',
+  'editor.opening': 'Abriendo…',
+  'editor.opening.cancel': 'Cancelar',
+  'editor.task.exportPdf': 'Exportando PDF…',
+  'editor.task.save': 'Guardando…',
+  'editor.task.cancel': 'Cancelar',
   'editor.search': 'Buscar',
   'editor.searchPlaceholder': 'Buscar en el documento',
   'editor.searchClose': 'Cerrar búsqueda',
